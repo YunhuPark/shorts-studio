@@ -1,0 +1,16 @@
+[project]
+name = "shorts-studio"
+version = "0.0.1"
+description = "AI short-video studio: storyboard -> images -> voices -> rendered 9:16 short"
+requires-python = ">=3.11"
+dependencies = ["pillow", "numpy", "imageio-ffmpeg"]
+
+[project.scripts]
+shorts-studio = "shorts_studio.cli:main"
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["src"]

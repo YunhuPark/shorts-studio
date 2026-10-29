@@ -1,0 +1,11 @@
+__pycache__/
+*.pyc
+.venv/
+.cache/
+output/
+*.egg-info/
+# generated media stays out of git; examples reference an images folder on disk
+examples/**/images/
+# scratch copies from the prototype session
+chk/
+serve/
