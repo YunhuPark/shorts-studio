@@ -5,6 +5,7 @@ import argparse
 import sys
 from pathlib import Path
 
+from .generate import plan_generation, run_generation
 from .models import Storyboard, VoiceSpec
 from .providers import AzureVoiceProvider, DirectoryImageSource, GeminiImageProvider, ProviderError
 from .qa import lint, missing_images
@@ -104,6 +105,43 @@ def cmd_image_consistency(a: argparse.Namespace) -> int:
     return 0
 
 
+def _pairs(items: list[str] | None) -> list[tuple[str, Path]]:
+    out = []
+    for item in items or []:
+        key, path = item.split("=", 1)
+        out.append((key, Path(path)))
+    return out
+
+
+def cmd_generate(a: argparse.Namespace) -> int:
+    """Create missing (or --replace) shot images conditioned on reference images."""
+    sb = Storyboard.load(a.storyboard)
+    char_refs = dict(_pairs(a.char_ref))
+    shot_refs: dict[int, list[Path]] = {}
+    for key, path in _pairs(a.shot_ref):
+        shot_refs.setdefault(int(key), []).append(path)
+    for path in [*char_refs.values(), *(p for ps in shot_refs.values() for p in ps)]:
+        if not path.exists():
+            print(f"reference image not found: {path}", file=sys.stderr)
+            return 2
+    images = DirectoryImageSource(a.images)
+    items = plan_generation(sb, images, char_refs, shot_refs, parse_only(a.shots), parse_only(a.replace))
+    print(f"{len(items)} image call(s) with model '{a.model}': shots {[i.shot.n for i in items]}")
+    for item in items:
+        note = f" (existing image will be kept as cut{item.shot.n:02d}_prev.png)" if item.replaces else ""
+        print(f"--- shot {item.shot.n}: refs={[r.name for r in item.refs]}{note}")
+        if a.dry_run:
+            print(item.prompt, "\n")
+    if a.dry_run or not items:
+        return 0
+    try:
+        run_generation(items, GeminiImageProvider(a.model), Path(a.images), a.model)
+    except ProviderError as e:
+        print(f"stopped: {e}", file=sys.stderr)
+        return 1
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     p = argparse.ArgumentParser(prog="shorts-studio")
     sub = p.add_subparsers(dest="cmd", required=True)
@@ -140,6 +178,17 @@ def main(argv: list[str] | None = None) -> int:
     c.add_argument("--out", default="output/consistency")
     c.add_argument("--dry-run", action="store_true", help="print the prompts, make no API calls")
     c.set_defaults(fn=cmd_image_consistency)
+
+    g = sub.add_parser("generate", help="make missing shot images using reference images (Gemini API)")
+    g.add_argument("storyboard")
+    g.add_argument("--images", required=True, help="folder with cutNN.png; new images are written here")
+    g.add_argument("--model", required=True)
+    g.add_argument("--char-ref", action="append", metavar="CHARACTER=IMAGE", help="reference image per character")
+    g.add_argument("--shot-ref", action="append", metavar="N=IMAGE", help="extra reference image for shot N (repeatable)")
+    g.add_argument("--shots", help="limit to these shot numbers")
+    g.add_argument("--replace", help="shot numbers to regenerate even if an image exists (old one kept as _prev)")
+    g.add_argument("--dry-run", action="store_true", help="print the plan and prompts, make no API calls")
+    g.set_defaults(fn=cmd_generate)
 
     args = p.parse_args(argv)
     return args.fn(args)

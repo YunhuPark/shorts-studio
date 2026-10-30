@@ -23,7 +23,7 @@ def frames(path, start, dur):
 
 
 def shift(a, b):
-    a, b = a[80:400, 40:230], b[80:400, 40:230]
+    a, b = a[60:300, 40:230], b[60:300, 40:230]  # rows above the subtitle band (~72% of the height)
     win = np.outer(np.hanning(a.shape[0]), np.hanning(a.shape[1]))
     fa, fb = np.fft.rfft2((a - a.mean()) * win), np.fft.rfft2((b - b.mean()) * win)
     r = fa * np.conj(fb)

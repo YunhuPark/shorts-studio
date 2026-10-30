@@ -34,8 +34,12 @@ python -m shorts_studio render ... --only 5,14,16          # preview a few shots
 python -m shorts_studio voice-samples --out output/voice_samples
 python -m shorts_studio image-consistency examples/convenience-store/storyboard.json \
     --character grandpa --shots 5,16,21 --model <gemini-image-model-id> [--dry-run]
+python -m shorts_studio generate examples/convenience-store/storyboard.json --images <folder> \
+    --model <gemini-image-model-id> --char-ref grandpa=<folder>/cut05.png --char-ref alba=<folder>/cut13.png \
+    [--shot-ref 24=<folder>/cut26.png] [--shots 22,23] [--replace 1] [--dry-run]   # make missing shots with reference images
 python -m unittest discover -s tests
 ```
+`generate` writes `cutNN.png` plus `cutNN.meta.json` (model, prompt, references) and keeps a replaced image as `cutNN_prev.png`.
 Shots without an image are skipped, so the renderer works on a partial set.
 
 ## Fonts
