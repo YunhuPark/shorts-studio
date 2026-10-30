@@ -2,7 +2,8 @@
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass, field
+import os
+from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
 CAMERAS = ("push_in", "pull_out", "pan_right", "handheld", "static")
@@ -46,6 +47,25 @@ class Storyboard:
         shots = [Shot(**s) for s in raw["shots"]]
         return cls(raw["title"], raw.get("logline", ""), voices, raw.get("style", ""), raw.get("place", ""),
                    raw.get("characters", {}), shots)
+
+    def to_dict(self) -> dict:
+        shots = []
+        for s in self.shots:
+            d = asdict(s)
+            shots.append({k: v for k, v in d.items() if v is not None})
+        return {"title": self.title, "logline": self.logline,
+                "voices": {k: asdict(v) for k, v in self.voices.items()},
+                "style": self.style, "place": self.place, "characters": self.characters, "shots": shots}
+
+    def save(self, path: str | Path) -> None:
+        """Write atomically so a crash never leaves a half-written storyboard."""
+        path = Path(path)
+        tmp = path.with_name(path.name + ".tmp")
+        tmp.write_text(json.dumps(self.to_dict(), ensure_ascii=False, indent=2), encoding="utf-8")
+        os.replace(tmp, path)
+
+    def shot(self, n: int) -> Shot | None:
+        return next((s for s in self.shots if s.n == n), None)
 
     def image_prompt(self, shot: Shot) -> str:
         """Scene + place + the fixed look of every character in the shot + global style."""

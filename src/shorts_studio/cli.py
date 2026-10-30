@@ -142,6 +142,38 @@ def cmd_generate(a: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_serve(a: argparse.Namespace) -> int:
+    """Run the local dashboard API on localhost only."""
+    import uvicorn
+
+    from .api.app import Settings, create_app
+    settings = Settings.from_env()
+    settings.root = Path(a.data)
+    print(f"dashboard API: http://127.0.0.1:{a.port}  (data: {settings.root.resolve()})")
+    uvicorn.run(create_app(settings), host="127.0.0.1", port=a.port, log_level="info")
+    return 0
+
+
+def cmd_import_project(a: argparse.Namespace) -> int:
+    """Create a dashboard project from a storyboard file and an images folder."""
+    import shutil
+
+    from .api.store import ProjectStore
+    store = ProjectStore(a.data)
+    shot_refs: dict[str, list[str]] = {}
+    for key, path in _pairs(a.shot_ref):
+        shot_refs.setdefault(key, []).append(path.name)
+    settings = {"model": a.model, "char_refs": {k: p.name for k, p in _pairs(a.char_ref)}, "shot_refs": shot_refs}
+    d = store.create(a.id, a.storyboard, a.images, settings)
+    if a.tts_cache_from:  # reuse already-synthesised wavs so the first render does not re-spend characters
+        dest = Path(a.data) / "cache" / "tts"
+        dest.mkdir(parents=True, exist_ok=True)
+        for f in Path(a.tts_cache_from).glob("*.wav"):
+            shutil.copyfile(f, dest / f.name)
+    print(f"created project '{a.id}' at {d} with {len(list((d / 'images').glob('cut*.png')))} images")
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     p = argparse.ArgumentParser(prog="shorts-studio")
     sub = p.add_subparsers(dest="cmd", required=True)
@@ -189,6 +221,22 @@ def main(argv: list[str] | None = None) -> int:
     g.add_argument("--replace", help="shot numbers to regenerate even if an image exists (old one kept as _prev)")
     g.add_argument("--dry-run", action="store_true", help="print the plan and prompts, make no API calls")
     g.set_defaults(fn=cmd_generate)
+
+    s = sub.add_parser("serve", help="run the local dashboard API (localhost only)")
+    s.add_argument("--data", default=".data", help="folder for projects, caches and the spend ledger")
+    s.add_argument("--port", type=int, default=8765, help="(8000 is reserved by Windows on some machines)")
+    s.set_defaults(fn=cmd_serve)
+
+    i = sub.add_parser("import-project", help="create a dashboard project from a storyboard and images")
+    i.add_argument("id", help="lowercase letters, digits and hyphens")
+    i.add_argument("storyboard")
+    i.add_argument("--images", required=True)
+    i.add_argument("--data", default=".data")
+    i.add_argument("--model", default="gemini-3.1-flash-image")
+    i.add_argument("--char-ref", action="append", metavar="CHARACTER=IMAGE", help="reference image per character")
+    i.add_argument("--shot-ref", action="append", metavar="N=IMAGE", help="extra reference for shot N (repeatable)")
+    i.add_argument("--tts-cache-from", help="folder of cached wavs to copy in")
+    i.set_defaults(fn=cmd_import_project)
 
     args = p.parse_args(argv)
     return args.fn(args)

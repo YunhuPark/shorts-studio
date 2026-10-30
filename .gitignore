@@ -9,3 +9,6 @@ examples/**/images/
 # scratch copies from the prototype session
 chk/
 serve/
+
+# local dashboard data (projects, caches, spend ledger)
+.data/

@@ -5,6 +5,10 @@ description = "AI short-video studio: storyboard -> images -> voices -> rendered
 requires-python = ">=3.11"
 dependencies = ["pillow", "numpy", "imageio-ffmpeg"]
 
+[project.optional-dependencies]
+api = ["fastapi", "uvicorn"]
+dev = ["httpx"]  # FastAPI TestClient
+
 [project.scripts]
 shorts-studio = "shorts_studio.cli:main"
 

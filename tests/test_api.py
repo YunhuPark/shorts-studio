@@ -1,0 +1,324 @@
+import importlib.util
+import json
+import os
+import tempfile
+import threading
+import time
+import unittest
+import wave
+from pathlib import Path
+
+from PIL import Image
+
+HAVE_API = importlib.util.find_spec("fastapi") is not None and importlib.util.find_spec("httpx") is not None
+if HAVE_API:
+    from fastapi.testclient import TestClient
+
+    from shorts_studio.api.app import Deps, Settings, create_app
+    from shorts_studio.api.store import ProjectStore
+    from shorts_studio.providers import ProviderError
+
+STORYBOARD = {
+    "title": "테스트", "logline": "l",
+    "voices": {"narrator": {"provider": "azure", "voice": "ko-KR-InJoonNeural", "rate": "+22%", "pitch": "0%"},
+               "grandpa": {"provider": "azure", "voice": "ko-KR-BongJinNeural", "rate": "-10%", "pitch": "0%"}},
+    "style": "STYLE", "place": "PLACE", "characters": {"grandpa": "OLD MAN"},
+    "shots": [{"n": 1, "who": "narrator", "text": "저기, 오늘은 두 개네요?", "chars": [], "camera": "push_in",
+               "highlight": ["두 개"], "scene": "scene one"},
+              {"n": 2, "who": "grandpa", "text": "집사람 몫이야.", "chars": ["grandpa"], "camera": "static",
+               "highlight": [], "scene": "scene two"},
+              {"n": 3, "who": "", "text": "", "chars": [], "camera": "static", "highlight": [], "scene": "no image yet"}],
+}
+
+
+class FakeImages:
+    def __init__(self):
+        self.calls = []
+        self.hold = None   # threading.Event: make generation wait until released
+        self.fail = False
+
+    def __call__(self, model):
+        outer = self
+
+        class P:
+            def generate(self, prompt, refs, out_path):
+                outer.calls.append((model, prompt, list(refs)))
+                if outer.hold is not None:
+                    outer.hold.wait(5)
+                if outer.fail:
+                    raise ProviderError("quota exceeded")
+                Image.new("RGB", (16, 28), "blue").save(out_path)
+                return out_path
+        return P()
+
+
+class FakeVoice:
+    fail = False
+
+    def __call__(self, cache):
+        cache = Path(cache)
+
+        class V:
+            def synthesize(self_inner, text, spec):
+                if FakeVoice.fail:
+                    raise ProviderError("AZURE_SPEECH_KEY and AZURE_SPEECH_REGION must be set")
+                cache.mkdir(parents=True, exist_ok=True)
+                p = cache / f"{abs(hash((text, spec.voice, spec.rate)))}.wav"
+                with wave.open(str(p), "wb") as w:
+                    w.setnchannels(1), w.setsampwidth(2), w.setframerate(24000)
+                    w.writeframes(b"\x00\x00" * 12000)
+                return p
+        return V()
+
+
+@unittest.skipUnless(HAVE_API, "fastapi/httpx not installed (pip install -e .[api,dev])")
+class ApiTest(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        root = Path(self.tmp.name)
+        sb = root / "sb.json"
+        sb.write_text(json.dumps(STORYBOARD, ensure_ascii=False), encoding="utf-8")
+        imgs = root / "imgs"
+        imgs.mkdir()
+        for n in (1, 2):
+            Image.new("RGB", (572, 1024), "gray").save(imgs / f"cut{n:02d}.png")
+        self.store = ProjectStore(root / "data")
+        self.store.create("demo", sb, imgs, {"char_refs": {"grandpa": "cut02.png"}})
+        self.images = FakeImages()
+        self.render_hold = None
+        self.render_calls = []
+
+        def fake_render(sb_, images, voices, out, opts, only, log):
+            if self.render_hold is not None:
+                self.render_hold.wait(5)
+            for sh in sb_.shots:
+                if images.path_for(sh) and (only is None or sh.n in only):
+                    log(f"shot{sh.n:02d} @ 0.0s")
+            Path(out).write_bytes(b"\x00\x00\x00\x18ftypmp42" + b"0" * 64)
+            self.render_calls.append(only)
+
+        self.settings = Settings(root / "data", image_price_usd=0.05, daily_cap_usd=0.12,
+                                 allowed_hosts=("testserver", "localhost"))
+        self.client = TestClient(create_app(self.settings, Deps(self.images, FakeVoice(), fake_render)))
+
+    def wait_job(self, job_id, timeout=10):
+        end = time.time() + timeout
+        while time.time() < end:
+            job = self.client.get(f"/api/jobs/{job_id}").json()
+            if job["state"] in ("done", "failed"):
+                return job
+            time.sleep(0.05)
+        self.fail("job did not finish")
+
+
+class Basics(ApiTest):
+    def test_settings_never_expose_key_values(self):
+        os.environ["GEMINI_API_KEY"] = "SUPER-SECRET-VALUE"
+        os.environ["AZURE_SPEECH_KEY"], os.environ["AZURE_SPEECH_REGION"] = "ANOTHER-SECRET", "koreacentral"
+        self.addCleanup(lambda: [os.environ.pop(k, None) for k in ("GEMINI_API_KEY", "AZURE_SPEECH_KEY", "AZURE_SPEECH_REGION")])
+        r = self.client.get("/api/settings")
+        self.assertEqual(r.json()["keys"], {"azure": True, "gemini": True})
+        self.assertNotIn("SECRET", r.text)
+
+    def test_list_and_get_project(self):
+        listing = self.client.get("/api/projects").json()
+        self.assertEqual(listing, [{"id": "demo", "title": "테스트", "logline": "l", "shots": 3, "images": 2}])
+        p = self.client.get("/api/projects/demo").json()
+        self.assertEqual([s["has_image"] for s in p["shots"]], [True, True, False])
+        self.assertEqual(p["shots"][0]["phrases"], ["저기 오늘은 두 개네요?"])
+        self.assertIn("push_in", p["cameras"])
+
+    def test_only_localhost_hosts_are_served(self):
+        # a page on another domain that resolves to 127.0.0.1 (DNS rebinding) sends its own Host header
+        self.assertEqual(self.client.get("/api/health", headers={"host": "evil.example.com"}).status_code, 400)
+        self.assertEqual(self.client.get("/api/health", headers={"host": "localhost:8765"}).status_code, 200)
+
+    def test_json_content_type_is_required_for_actions(self):
+        # a cross-site form post cannot send application/json without a CORS preflight, so it must be refused
+        r = self.client.post("/api/projects/demo/render", content=b'{"only": null}',
+                             headers={"content-type": "text/plain"})
+        self.assertEqual(r.status_code, 422)
+        self.assertEqual(self.client.get("/api/projects/demo/jobs").json(), [])
+
+    def test_unknown_and_unsafe_project_ids_are_404(self):
+        for pid in ("nope", "..", "demo%2F..%2F..", "UPPER", ".data"):
+            self.assertEqual(self.client.get(f"/api/projects/{pid}").status_code, 404, pid)
+
+    def test_subtitle_preview(self):
+        r = self.client.post("/api/subtitles/preview", json={"text": "그래서 대신, 뜨거운 물을 두 컵 부었다."})
+        self.assertEqual(r.json()["phrases"], ["그래서 대신 뜨거운 물을", "두 컵 부었다"])
+
+
+class Editing(ApiTest):
+    def test_patch_persists_and_keeps_a_backup(self):
+        r = self.client.patch("/api/projects/demo/shots/1", json={"text": "  새 대사  ", "camera": "pull_out",
+                                                                   "highlight": ["새", " "]})
+        self.assertEqual(r.status_code, 200)
+        self.assertEqual(r.json()["text"], "새 대사")
+        saved = json.loads((self.store.dir("demo") / "storyboard.json").read_text(encoding="utf-8"))
+        self.assertEqual(saved["shots"][0]["camera"], "pull_out")
+        self.assertEqual(saved["shots"][0]["highlight"], ["새"])
+        bak = json.loads((self.store.dir("demo") / "storyboard.json.bak").read_text(encoding="utf-8"))
+        self.assertEqual(bak["shots"][0]["text"], "저기, 오늘은 두 개네요?")
+
+    def test_patch_validation(self):
+        self.assertEqual(self.client.patch("/api/projects/demo/shots/1", json={"camera": "spin"}).status_code, 422)
+        self.assertEqual(self.client.patch("/api/projects/demo/shots/1", json={"who": "ghost"}).status_code, 422)
+        self.assertEqual(self.client.patch("/api/projects/demo/shots/9", json={"text": "x"}).status_code, 404)
+        self.assertEqual(self.client.patch("/api/projects/demo/shots/1", json={"text": "x" * 301}).status_code, 422)
+        self.assertEqual(self.client.patch("/api/projects/demo/shots/1", json={"min_dur": 99}).status_code, 422)
+
+    def test_untouched_fields_stay(self):
+        self.client.patch("/api/projects/demo/shots/2", json={"scene": "changed"})
+        shot = self.client.get("/api/projects/demo").json()["shots"][1]
+        self.assertEqual(shot["text"], "집사람 몫이야.")
+        self.assertEqual(shot["scene"], "changed")
+
+    def test_set_voice(self):
+        ok = self.client.put("/api/projects/demo/voices/grandpa",
+                             json={"voice": "ko-KR-GookMinNeural", "rate": "-12%", "pitch": "0%"})
+        self.assertEqual(ok.json()["voice"], "ko-KR-GookMinNeural")
+        self.assertEqual(self.client.get("/api/projects/demo").json()["voices"]["grandpa"]["rate"], "-12%")
+
+    def test_set_voice_rejects_bad_input(self):
+        for body in ({"voice": "not-a-voice"}, {"voice": "ko-KR-GookMinNeural", "rate": "fast"},
+                     {"voice": "ko-KR-GookMinNeural", "rate": "-10%'><evil"}):
+            self.assertEqual(self.client.put("/api/projects/demo/voices/grandpa", json=body).status_code, 422)
+        self.assertEqual(self.client.put("/api/projects/demo/voices/ghost", json={"voice": "ko-KR-GookMinNeural"}).status_code, 404)
+
+
+class Media(ApiTest):
+    def test_image_and_thumbnail(self):
+        full = self.client.get("/api/projects/demo/images/1")
+        self.assertEqual(full.headers["content-type"], "image/png")
+        thumb = self.client.get("/api/projects/demo/images/1?w=200")
+        self.assertEqual(thumb.headers["content-type"], "image/jpeg")
+        from io import BytesIO
+        self.assertLessEqual(Image.open(BytesIO(thumb.content)).width, 200)
+        self.assertEqual(self.client.get("/api/projects/demo/images/3").status_code, 404)
+
+    def test_voice_sample(self):
+        r = self.client.get("/api/voices/sample", params={"voice": "ko-KR-BongJinNeural"})
+        self.assertEqual((r.status_code, r.headers["content-type"]), (200, "audio/wav"))
+        self.assertEqual(self.client.get("/api/voices/sample", params={"voice": "evil"}).status_code, 422)
+        self.assertEqual(self.client.get("/api/voices/sample", params={"voice": "ko-KR-BongJinNeural", "text": "가" * 121}).status_code, 422)
+
+    def test_voice_sample_provider_error_is_503(self):
+        FakeVoice.fail = True
+        self.addCleanup(lambda: setattr(FakeVoice, "fail", False))
+        r = self.client.get("/api/voices/sample", params={"voice": "ko-KR-BongJinNeural"})
+        self.assertEqual(r.status_code, 503)
+        self.assertIn("AZURE_SPEECH_KEY", r.json()["detail"])
+
+
+class Regenerate(ApiTest):
+    def test_needs_explicit_confirmation_and_shows_cost(self):
+        r = self.client.post("/api/projects/demo/shots/1/regenerate", json={})
+        self.assertEqual(r.status_code, 400)
+        self.assertEqual(r.json()["detail"]["estimated_usd"], 0.05)
+        self.assertEqual(self.images.calls, [])
+
+    def test_regenerates_keeps_previous_and_records_spend(self):
+        r = self.client.post("/api/projects/demo/shots/2/regenerate", json={"confirm": True})
+        self.assertEqual(r.status_code, 202)
+        job = self.wait_job(r.json()["id"])
+        self.assertEqual(job["state"], "done", job)
+        d = self.store.images_dir("demo")
+        self.assertTrue((d / "cut02_prev.png").exists())
+        self.assertEqual(Image.open(d / "cut02.png").size, (16, 28))
+        model, prompt, refs = self.images.calls[0]
+        self.assertIn("OLD MAN", prompt)
+        self.assertEqual([p.name for p in refs], ["cut02.png"])  # the configured grandpa reference
+        self.assertEqual(self.client.get("/api/settings").json()["spent_today_usd"], 0.05)
+
+    def test_daily_cap_stops_spending(self):
+        for _ in range(2):  # 0.05 + 0.05 = 0.10 <= 0.12
+            r = self.client.post("/api/projects/demo/shots/1/regenerate", json={"confirm": True})
+            self.assertEqual(self.wait_job(r.json()["id"])["state"], "done")
+        r = self.client.post("/api/projects/demo/shots/1/regenerate", json={"confirm": True})
+        self.assertEqual(r.status_code, 429)
+        self.assertEqual(len(self.images.calls), 2)
+
+
+class SpendGuards(ApiTest):
+    def test_failed_generation_gives_the_reservation_back(self):
+        self.images.fail = True
+        r = self.client.post("/api/projects/demo/shots/1/regenerate", json={"confirm": True})
+        job = self.wait_job(r.json()["id"])
+        self.assertEqual(job["state"], "failed")
+        self.assertIn("quota exceeded", job["error"])
+        self.assertEqual(self.client.get("/api/settings").json()["spent_today_usd"], 0)
+        # the original image is untouched
+        self.assertEqual(Image.open(self.store.images_dir("demo") / "cut01.png").size, (572, 1024))
+
+    def test_same_shot_cannot_be_regenerated_twice_at_once(self):
+        self.images.hold = threading.Event()
+        first = self.client.post("/api/projects/demo/shots/1/regenerate", json={"confirm": True})
+        self.assertEqual(first.status_code, 202)
+        self.assertEqual(self.client.post("/api/projects/demo/shots/1/regenerate", json={"confirm": True}).status_code, 409)
+        self.images.hold.set()
+        self.assertEqual(self.wait_job(first.json()["id"])["state"], "done")
+        self.assertEqual(self.client.get("/api/settings").json()["spent_today_usd"], 0.05)
+
+    def test_rapid_requests_cannot_overshoot_the_cap(self):
+        self.images.hold = threading.Event()  # nothing has finished when the later requests arrive
+        responses = [self.client.post(f"/api/projects/demo/shots/{n}/regenerate", json={"confirm": True})
+                     for n in (1, 2, 3)]
+        self.assertEqual([r.status_code for r in responses], [202, 202, 429])  # cap 0.12: two of 0.05, not three
+        self.assertEqual(self.client.get("/api/settings").json()["spent_today_usd"], 0.10)
+        self.images.hold.set()
+        for r in responses[:2]:  # let the worker threads finish before the temp folder is removed
+            self.wait_job(r.json()["id"])
+
+
+class Rendering(ApiTest):
+    def test_render_job_lists_and_serves_the_file(self):
+        r = self.client.post("/api/projects/demo/render", json={})
+        self.assertEqual(r.status_code, 202)
+        job = self.wait_job(r.json()["id"])
+        self.assertEqual(job["state"], "done", job)
+        self.assertEqual(job["progress"], 1.0)
+        listing = self.client.get("/api/projects/demo/renders").json()
+        self.assertEqual(listing[0]["name"], job["result"])
+        got = self.client.get(f"/api/projects/demo/renders/{job['result']}")
+        self.assertEqual((got.status_code, got.headers["content-type"]), (200, "video/mp4"))
+
+    def test_second_render_while_running_is_409(self):
+        self.render_hold = threading.Event()
+        first = self.client.post("/api/projects/demo/render", json={})
+        time.sleep(0.2)
+        self.assertEqual(self.client.post("/api/projects/demo/render", json={}).status_code, 409)
+        self.render_hold.set()
+        self.assertEqual(self.wait_job(first.json()["id"])["state"], "done")
+
+    def test_render_only_selected_shots(self):
+        job = self.wait_job(self.client.post("/api/projects/demo/render", json={"only": [2]}).json()["id"])
+        self.assertEqual(job["state"], "done")
+        self.assertEqual(self.render_calls[-1], {2})
+
+    def test_render_without_images_is_rejected(self):
+        self.assertEqual(self.client.post("/api/projects/demo/render", json={"only": [3]}).status_code, 422)
+
+    def test_render_name_is_validated(self):
+        for name in ("../storyboard.json", "evil.mp4", "render-1.mp4"):
+            self.assertEqual(self.client.get(f"/api/projects/demo/renders/{name}").status_code, 404)
+
+    def test_failed_job_reports_the_error(self):
+        def boom(*a, **k):
+            raise RuntimeError("ffmpeg exploded")
+        app = create_app(self.settings, Deps(self.images, FakeVoice(), boom))
+        c = TestClient(app)
+        jid = c.post("/api/projects/demo/render", json={}).json()["id"]
+        end = time.time() + 10
+        while time.time() < end:
+            job = c.get(f"/api/jobs/{jid}").json()
+            if job["state"] != "running" and job["state"] != "queued":
+                break
+            time.sleep(0.05)
+        self.assertEqual(job["state"], "failed")
+        self.assertIn("ffmpeg exploded", job["error"])
+
+
+if __name__ == "__main__":
+    unittest.main()

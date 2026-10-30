@@ -42,6 +42,30 @@ python -m unittest discover -s tests
 `generate` writes `cutNN.png` plus `cutNN.meta.json` (model, prompt, references) and keeps a replaced image as `cutNN_prev.png`.
 Shots without an image are skipped, so the renderer works on a partial set.
 
+## Local dashboard (FastAPI + Next.js)
+A single-user web UI over the same library: edit the storyboard (dialogue, camera, highlight words, live subtitle
+preview), audition and pick voices, regenerate one shot's image (with a cost confirmation), render, and play/download.
+```bash
+python -m venv .venv && .venv/Scripts/python -m pip install -e ".[api,dev]"      # backend deps
+cd frontend && npm install && cd ..                                              # frontend deps
+
+# once per project: copy a storyboard + images into the dashboard data folder (.data/, git-ignored)
+python -m shorts_studio import-project convenience-store examples/convenience-store/storyboard.json \
+    --images <folder with cutNN.png> --char-ref grandpa=cut05.png --char-ref alba=cut13.png
+
+python -m shorts_studio serve --data .data --port 8765          # API, localhost only
+npm --prefix frontend run dev -- -p 3010                        # UI -> http://localhost:3010
+```
+- Keys come from the environment of the **API process** (`AZURE_SPEECH_KEY/REGION`, `GEMINI_API_KEY`) and are never
+  sent to the browser; the UI only shows whether they are set.
+- Paid actions (image regeneration) need an explicit confirmation and stop at an estimated daily cap
+  (`SHORTS_DAILY_CAP_USD`, default 2.00; unit price estimate `SHORTS_IMAGE_PRICE_USD`, default 0.067). The ledger is
+  `.data/spend.jsonl` and holds estimates, not invoices.
+- Port 8000 is reserved by Windows on some machines (that is why the default is 8765). The frontend proxies `/api/*` to
+  `API_ORIGIN` (default `http://127.0.0.1:8765`).
+- Edits are written to `storyboard.json` atomically and the previous version is kept as `storyboard.json.bak`.
+- Tests: `.venv/Scripts/python -m unittest discover -s tests`; frontend: `cd frontend && npx tsc --noEmit && npx next build`.
+
 ## Fonts
 Subtitles need a Korean bold font. Resolution order: `--font`, `SHORTS_FONT`, `assets/fonts/Pretendard*Bold*` or
 `NotoSansKR*Bold*`, then Windows Malgun Gothic (development fallback only — not redistributable in a hosted service).
