@@ -47,4 +47,5 @@ Both Pretendard and Noto Sans KR are SIL OFL fonts.
 See [docs/mvp-design.md](docs/mvp-design.md) section 11.
 - Done: provider-based library + CLI, output identical to the prototype (pixel diff 0.0000 on sampled frames),
   bundled open font (Pretendard Bold, SIL OFL 1.1; licence text in `assets/fonts/Pretendard-LICENSE.txt`).
-- Open: the real-API test of reference-image consistency (`image-consistency`, needs `GEMINI_API_KEY`).
+- Done: real-API reference-image consistency test (see "Phase 0 results" in docs/mvp-design.md).
+- Next: multi-character shots, an objective face-similarity check, and Phase 1 (API + worker).

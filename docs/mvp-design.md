@@ -50,7 +50,7 @@ class ScriptProvider:  plan(brief, character_bible) -> Storyboard
 class Renderer:        render(storyboard, assets, options) -> Asset
 ```
 - 프로토타입 대응: `cuts_v2.json` = Storyboard, `build_v2.py` = Renderer, `tts()` = VoiceProvider(Azure), Gemini 앱 자동화 = **서비스에서는 제거하고 ImageProvider(API)로 대체**.
-- 인물 일관성은 "첫 기준 이미지를 모든 후속 요청에 참조로 넘기는" 방식으로 처리한다. 프로토타입에서 같은 대화에서 이전 이미지를 참조하자 얼굴이 맞았다. **API에서 참조 이미지 입력이 같은 효과를 내는지는 미확인**이라 Phase 0에서 가장 먼저 시험한다.
+- 인물 일관성은 "첫 기준 이미지를 모든 후속 요청에 참조로 넘기는" 방식으로 처리한다. 프로토타입에서 같은 대화에서 이전 이미지를 참조하자 얼굴이 맞았다. **Phase 0에서 시험해 확인했다**(아래 "Phase 0 결과"): 기준 이미지를 요청에 첨부하면 얼굴, 안경, 모자, 옷이 컷을 건너 유지된다.
 
 ## 5. 잡 상태와 흐름
 - 프로젝트 상태: `draft → planning → storyboard_ready → generating → generated → rendering → review → done | failed`
@@ -120,3 +120,20 @@ class Renderer:        render(storyboard, assets, options) -> Asset
 3. 목소리 공급자: Azure만으로 갈지 ElevenLabs를 서비스에 쓸 수 있는지(약관·계약 확인).
 4. 이미지 공급자: Gemini API만 쓸지, 대체 모델 병행(가격과 일관성 비교 필요).
 5. 사업자 등록과 결제 연동 준비.
+
+## Phase 0 결과 (2026-10-30)
+
+**이미지 API 참조 일관성 시험** — `shorts-studio image-consistency`, 모델 `gemini-3.1-flash-image`(Nano Banana 2), 4회 호출
+(기준 초상 1 + 컷 5, 16, 21), 비교 시트는 사람이 눈으로 판정.
+- 기준 이미지를 같은 요청에 첨부하자 **얼굴 인상, 철테 안경, 회색 플랫캡, 갈색 카디건, 흰 티셔츠가 세 컷 모두 유지됐다.**
+  클로즈업(컷 16)이 기준과 가장 비슷했고, 전체샷(컷 5)과 옆모습(컷 21)도 같은 인물로 보였다.
+- 해상도는 768×1376으로 Gemini 앱 결과(572×1024)보다 높아, 1080×1920으로 확대할 때 유리하다.
+- 한계: 판정은 육안이며 객관 지표(얼굴 임베딩 유사도)는 아직 없다. 인물 둘이 한 화면에 나오는 컷, 극단적 각도,
+  컷 수가 많을 때의 누적 변화는 시험하지 않았다. 표본이 3컷뿐이라 일관성이 항상 유지된다고 단정할 수 없다.
+- 비용: 요금표 기준 1K 이미지 $0.067 × 4 ≈ $0.27로 추정. 실제 청구액은 확인하지 못했다.
+- **요금표 요약의 모델명은 틀렸다.** 요금 페이지 요약에 나온 `gemini-nano-banana-2.1`은 실제 모델 목록에 없다.
+  서비스 구현 시 모델 ID와 단가는 `models.list`와 공식 요금 페이지에서 직접 확인한다(요약 도구 결과를 신뢰하지 않는다).
+  현재 목록의 이미지 모델: gemini-2.5-flash-image, gemini-3-pro-image, gemini-3.1-flash-image, gemini-3.1-flash-lite-image (및 preview 변형).
+
+**결론:** 참조 이미지 방식은 서비스의 인물 일관성 전략으로 채택 가능하다. 다음 검증은 (1) 두 인물 컷, (2) 20컷 이상 연속 생성,
+(3) 얼굴 유사도 자동 측정이다.
