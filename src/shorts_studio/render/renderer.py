@@ -3,9 +3,9 @@ from __future__ import annotations
 
 import subprocess
 import wave
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Callable
 
 from PIL import Image
 
@@ -77,7 +77,7 @@ def plan_shots(sb: Storyboard, images: ImageSource, voices: VoiceProvider, opts:
 def render_shot(plan: ShotPlan, opts: RenderOptions, ffmpeg: str, font: str, first: bool, last: bool) -> Path:
     shot, dur = plan.shot, plan.dur
     w, h, fps = opts.width, opts.height, opts.fps
-    frames = max(2, int(round(dur * fps)))
+    frames = max(2, round(dur * fps))
     work = Path(opts.work_dir)
     src = Image.open(plan.image).convert("RGB")
     up = src.resize((src.width * 2, src.height * 2), Image.LANCZOS)
@@ -93,7 +93,7 @@ def render_shot(plan: ShotPlan, opts: RenderOptions, ffmpeg: str, font: str, fir
         phrases = split_phrases(shot.text)
         weights = [len(p.replace(" ", "")) or 1 for p in phrases]
         t = opts.lead
-        for i, (p, wgt) in enumerate(zip(phrases, weights)):
+        for i, (p, wgt) in enumerate(zip(phrases, weights, strict=True)):
             span = plan.voice_len * wgt / sum(weights)
             start, end = t, t + span + (0.2 if i == len(phrases) - 1 else 0)
             t += span

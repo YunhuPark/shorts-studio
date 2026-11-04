@@ -54,7 +54,8 @@ class ProjectStore:
         return {**DEFAULT_SETTINGS, **data}
 
     def save_settings(self, pid: str, settings: dict) -> None:
-        (self.dir(pid) / "project.json").write_text(json.dumps(settings, ensure_ascii=False, indent=2), encoding="utf-8")
+        text = json.dumps(settings, ensure_ascii=False, indent=2)
+        (self.dir(pid) / "project.json").write_text(text, encoding="utf-8")
 
     def images_dir(self, pid: str) -> Path:
         d = self.dir(pid) / "images"

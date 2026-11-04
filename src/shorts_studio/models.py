@@ -41,7 +41,7 @@ class Storyboard:
     shots: list[Shot]
 
     @classmethod
-    def load(cls, path: str | Path) -> "Storyboard":
+    def load(cls, path: str | Path) -> Storyboard:
         raw = json.loads(Path(path).read_text(encoding="utf-8"))
         voices = {k: VoiceSpec(**v) for k, v in raw["voices"].items()}
         shots = [Shot(**s) for s in raw["shots"]]

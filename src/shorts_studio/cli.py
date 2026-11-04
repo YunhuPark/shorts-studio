@@ -174,6 +174,47 @@ def cmd_import_project(a: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_fetch_models(a: argparse.Namespace) -> int:
+    """Download and verify the face models (about 37 MB) into assets/models."""
+    from .vision.fetch import MODELS, ModelError, fetch
+    try:
+        for name in MODELS:
+            fetch(name)
+    except (ModelError, OSError) as e:
+        print(f"failed: {e}", file=sys.stderr)
+        return 1
+    return 0
+
+
+def cmd_face_check(a: argparse.Namespace) -> int:
+    """Measure whether each character's face stays the same across shots (needs the [vision] extra and models)."""
+    from .vision.faces import MIN_FACE_PX, SAME_PERSON_COSINE, OpenCVEmbedder, check_shots
+    from .vision.fetch import ModelError
+    sb = Storyboard.load(a.storyboard)
+    refs = dict(_pairs(a.reference))
+    if not refs:
+        print("give at least one --reference CHARACTER=IMAGE", file=sys.stderr)
+        return 2
+    try:
+        embedder = OpenCVEmbedder()
+        results = check_shots(sb, DirectoryImageSource(a.images), refs, embedder,
+                              a.threshold if a.threshold is not None else SAME_PERSON_COSINE,
+                              a.min_face_px if a.min_face_px is not None else MIN_FACE_PX)
+    except (ModelError, ImportError, ValueError) as e:
+        print(f"cannot run the face check: {e}", file=sys.stderr)
+        return 2
+    print(f"references: {', '.join(f'{k}={v.name}' for k, v in refs.items())}")
+    print(f"{'shot':>5}  {'expected':<14} {'status':<8} faces (assigned character, similarity, height px)")
+    for r in results:
+        faces = "; ".join(f"{(m.character or '?' + m.closest)} {m.similarity:.2f} {m.height_px:.0f}px"
+                          f"{' small' if m.small else ''}" for m in r.faces) or "-"
+        print(f"{r.shot:>5}  {','.join(r.expected):<14} {r.status:<8} {faces}")
+    drift = [r.shot for r in results if r.status == "drift?"]
+    small = [r.shot for r in results if r.status == "small"]
+    print(f"\npossible drift: {drift or 'none'} | too small to judge: {small or 'none'}")
+    return 1 if drift else 0
+
+
 def main(argv: list[str] | None = None) -> int:
     p = argparse.ArgumentParser(prog="shorts-studio")
     sub = p.add_subparsers(dest="cmd", required=True)
@@ -190,10 +231,10 @@ def main(argv: list[str] | None = None) -> int:
     r.add_argument("--speaker-rate", help="rate for overridden voices, e.g. -10%%")
     r.set_defaults(fn=cmd_render)
 
-    l = sub.add_parser("lint", help="check a storyboard")
-    l.add_argument("storyboard")
-    l.add_argument("--images")
-    l.set_defaults(fn=cmd_lint)
+    lint_p = sub.add_parser("lint", help="check a storyboard")
+    lint_p.add_argument("storyboard")
+    lint_p.add_argument("--images")
+    lint_p.set_defaults(fn=cmd_lint)
 
     v = sub.add_parser("voice-samples", help="write the same line in several voices")
     v.add_argument("--out", default="output/voice_samples")
@@ -216,7 +257,8 @@ def main(argv: list[str] | None = None) -> int:
     g.add_argument("--images", required=True, help="folder with cutNN.png; new images are written here")
     g.add_argument("--model", required=True)
     g.add_argument("--char-ref", action="append", metavar="CHARACTER=IMAGE", help="reference image per character")
-    g.add_argument("--shot-ref", action="append", metavar="N=IMAGE", help="extra reference image for shot N (repeatable)")
+    g.add_argument("--shot-ref", action="append", metavar="N=IMAGE",
+                   help="extra reference image for shot N (repeatable)")
     g.add_argument("--shots", help="limit to these shot numbers")
     g.add_argument("--replace", help="shot numbers to regenerate even if an image exists (old one kept as _prev)")
     g.add_argument("--dry-run", action="store_true", help="print the plan and prompts, make no API calls")
@@ -237,6 +279,17 @@ def main(argv: list[str] | None = None) -> int:
     i.add_argument("--shot-ref", action="append", metavar="N=IMAGE", help="extra reference for shot N (repeatable)")
     i.add_argument("--tts-cache-from", help="folder of cached wavs to copy in")
     i.set_defaults(fn=cmd_import_project)
+
+    m = sub.add_parser("fetch-models", help="download and verify the face models (about 37 MB)")
+    m.set_defaults(fn=cmd_fetch_models)
+
+    f = sub.add_parser("face-check", help="measure face consistency of a character across shots")
+    f.add_argument("storyboard")
+    f.add_argument("--images", required=True)
+    f.add_argument("--reference", action="append", metavar="CHARACTER=IMAGE", help="reference image per character")
+    f.add_argument("--threshold", type=float, help="cosine similarity below which a face is flagged (default 0.363)")
+    f.add_argument("--min-face-px", type=float, help="faces shorter than this are not judged (default 80)")
+    f.set_defaults(fn=cmd_face_check)
 
     args = p.parse_args(argv)
     return args.fn(args)

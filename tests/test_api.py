@@ -27,7 +27,8 @@ STORYBOARD = {
                "highlight": ["두 개"], "scene": "scene one"},
               {"n": 2, "who": "grandpa", "text": "집사람 몫이야.", "chars": ["grandpa"], "camera": "static",
                "highlight": [], "scene": "scene two"},
-              {"n": 3, "who": "", "text": "", "chars": [], "camera": "static", "highlight": [], "scene": "no image yet"}],
+              {"n": 3, "who": "", "text": "", "chars": [], "camera": "static", "highlight": [],
+               "scene": "no image yet"}],
 }
 
 
@@ -116,7 +117,8 @@ class Basics(ApiTest):
     def test_settings_never_expose_key_values(self):
         os.environ["GEMINI_API_KEY"] = "SUPER-SECRET-VALUE"
         os.environ["AZURE_SPEECH_KEY"], os.environ["AZURE_SPEECH_REGION"] = "ANOTHER-SECRET", "koreacentral"
-        self.addCleanup(lambda: [os.environ.pop(k, None) for k in ("GEMINI_API_KEY", "AZURE_SPEECH_KEY", "AZURE_SPEECH_REGION")])
+        self.addCleanup(lambda: [os.environ.pop(k, None)
+                                 for k in ("GEMINI_API_KEY", "AZURE_SPEECH_KEY", "AZURE_SPEECH_REGION")])
         r = self.client.get("/api/settings")
         self.assertEqual(r.json()["keys"], {"azure": True, "gemini": True})
         self.assertNotIn("SECRET", r.text)
@@ -185,7 +187,8 @@ class Editing(ApiTest):
         for body in ({"voice": "not-a-voice"}, {"voice": "ko-KR-GookMinNeural", "rate": "fast"},
                      {"voice": "ko-KR-GookMinNeural", "rate": "-10%'><evil"}):
             self.assertEqual(self.client.put("/api/projects/demo/voices/grandpa", json=body).status_code, 422)
-        self.assertEqual(self.client.put("/api/projects/demo/voices/ghost", json={"voice": "ko-KR-GookMinNeural"}).status_code, 404)
+        ghost = self.client.put("/api/projects/demo/voices/ghost", json={"voice": "ko-KR-GookMinNeural"})
+        self.assertEqual(ghost.status_code, 404)
 
 
 class Media(ApiTest):
@@ -202,7 +205,8 @@ class Media(ApiTest):
         r = self.client.get("/api/voices/sample", params={"voice": "ko-KR-BongJinNeural"})
         self.assertEqual((r.status_code, r.headers["content-type"]), (200, "audio/wav"))
         self.assertEqual(self.client.get("/api/voices/sample", params={"voice": "evil"}).status_code, 422)
-        self.assertEqual(self.client.get("/api/voices/sample", params={"voice": "ko-KR-BongJinNeural", "text": "가" * 121}).status_code, 422)
+        too_long = self.client.get("/api/voices/sample", params={"voice": "ko-KR-BongJinNeural", "text": "가" * 121})
+        self.assertEqual(too_long.status_code, 422)
 
     def test_voice_sample_provider_error_is_503(self):
         FakeVoice.fail = True
@@ -227,7 +231,7 @@ class Regenerate(ApiTest):
         d = self.store.images_dir("demo")
         self.assertTrue((d / "cut02_prev.png").exists())
         self.assertEqual(Image.open(d / "cut02.png").size, (16, 28))
-        model, prompt, refs = self.images.calls[0]
+        _model, prompt, refs = self.images.calls[0]
         self.assertIn("OLD MAN", prompt)
         self.assertEqual([p.name for p in refs], ["cut02.png"])  # the configured grandpa reference
         self.assertEqual(self.client.get("/api/settings").json()["spent_today_usd"], 0.05)
@@ -256,7 +260,8 @@ class SpendGuards(ApiTest):
         self.images.hold = threading.Event()
         first = self.client.post("/api/projects/demo/shots/1/regenerate", json={"confirm": True})
         self.assertEqual(first.status_code, 202)
-        self.assertEqual(self.client.post("/api/projects/demo/shots/1/regenerate", json={"confirm": True}).status_code, 409)
+        again = self.client.post("/api/projects/demo/shots/1/regenerate", json={"confirm": True})
+        self.assertEqual(again.status_code, 409)
         self.images.hold.set()
         self.assertEqual(self.wait_job(first.json()["id"])["state"], "done")
         self.assertEqual(self.client.get("/api/settings").json()["spent_today_usd"], 0.05)

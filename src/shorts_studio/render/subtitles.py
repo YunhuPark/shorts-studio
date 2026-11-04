@@ -8,7 +8,14 @@ from pathlib import Path
 from PIL import Image, ImageDraw, ImageFont
 
 YELLOW, WHITE = (255, 214, 10), (255, 255, 255)
-NOBREAK_AFTER = set("한 두 세 네 다섯 여섯 그 이 저 어떤 아무 매일 늘 딱 더 잘 못 안 이제 정말 너무 아주 또 다시 처음 마지막 낡은 하얀 뜨거운 같은 오는".split())
+NOBREAK_AFTER = frozenset({
+    # numerals and determiners
+    "한", "두", "세", "네", "다섯", "여섯", "그", "이", "저", "어떤", "아무",
+    # adverbs
+    "매일", "늘", "딱", "더", "잘", "못", "안", "이제", "정말", "너무", "아주", "또", "다시", "처음", "마지막",
+    # modifiers that belong to the next noun
+    "낡은", "하얀", "뜨거운", "같은", "오는",
+})
 
 
 def clean(s: str) -> str:
@@ -50,7 +57,7 @@ def split_sentence(sentence: str, limit: int = 15) -> list[str]:
             rest_cost, rest = solve(j + 1)
             cost = (len(size) - target) ** 2 + rest_cost - (6 if units[j][1] and j + 1 < n else 0)
             if cost < best[0]:
-                best = (cost, [size] + rest)
+                best = (cost, [size, *rest])
         memo[i] = best
         return best
 
@@ -65,8 +72,9 @@ def split_phrases(text: str) -> list[str]:
     return out
 
 
-def render_phrase(text: str, highlight: list[str], path: Path, font_path: str, size: tuple[int, int] = (1080, 1920)) -> None:
-    w, h = size
+def render_phrase(text: str, highlight: list[str], path: Path, font_path: str,
+                  size: tuple[int, int] = (1080, 1920)) -> None:
+    w, _ = size
     font = ImageFont.truetype(font_path, 76)
     img = Image.new("RGBA", size, (0, 0, 0, 0))
     d = ImageDraw.Draw(img)
@@ -88,8 +96,8 @@ def render_phrase(text: str, highlight: list[str], path: Path, font_path: str, s
         for ch in s:
             xs.append(cx)
             cx += d.textlength(ch, font=font)
-        for ch, cx in zip(s, xs):  # outline first so neighbours never cover a glyph
+        for ch, cx in zip(s, xs, strict=True):  # outline first so neighbours never cover a glyph
             d.text((cx, y), ch, font=font, fill=(0, 0, 0, 255), stroke_width=7, stroke_fill=(0, 0, 0, 255))
-        for ch, cx, col in zip(s, xs, cols):
-            d.text((cx, y), ch, font=font, fill=col + (255,))
+        for ch, cx, col in zip(s, xs, cols, strict=True):
+            d.text((cx, y), ch, font=font, fill=(*col, 255))
     img.save(path)

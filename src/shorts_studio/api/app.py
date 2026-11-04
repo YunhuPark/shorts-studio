@@ -10,9 +10,9 @@ import os
 import re
 import threading
 import time
+from collections.abc import Callable
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
-from typing import Callable
 
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.trustedhost import TrustedHostMiddleware
@@ -59,7 +59,7 @@ class Settings:
     allowed_hosts: tuple[str, ...] = ("localhost", "127.0.0.1", "[::1]")
 
     @classmethod
-    def from_env(cls) -> "Settings":
+    def from_env(cls) -> Settings:
         return cls(Path(os.environ.get("SHORTS_DATA", ".data")),
                    float(os.environ.get("SHORTS_IMAGE_PRICE_USD", "0.067")),
                    float(os.environ.get("SHORTS_DAILY_CAP_USD", "2.0")))
@@ -112,7 +112,7 @@ def create_app(settings: Settings | None = None, deps: Deps | None = None) -> Fa
     app.add_middleware(TrustedHostMiddleware, allowed_hosts=list(settings.allowed_hosts))
 
     @app.exception_handler(NotFound)
-    def _not_found(_req, exc):  # noqa: ANN001
+    def _not_found(_req, exc):
         from fastapi.responses import JSONResponse
         return JSONResponse({"detail": f"not found: {exc.args[0]}"}, status_code=404)
 

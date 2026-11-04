@@ -2,9 +2,9 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Callable
 
 from PIL import Image
 
@@ -62,7 +62,7 @@ def run_generation(items: list[GenItem], provider: ImageProvider, out_dir: Path,
         kept = _keep_previous(target) if item.replaces is not None and target.exists() else None
         try:
             provider.generate(item.prompt, item.refs, target)
-        except ProviderError as e:
+        except ProviderError:
             if kept is not None:  # put the original back so a failed replace loses nothing
                 kept.rename(target)
             raise

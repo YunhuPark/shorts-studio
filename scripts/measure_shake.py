@@ -31,9 +31,9 @@ def shift(a, b):
     y, x = np.unravel_index(np.argmax(c), c.shape)
 
     def refine(v, n, arr):
-        l, m, p = arr[(v - 1) % n], arr[v], arr[(v + 1) % n]
-        d = l - 2 * m + p
-        return v + (0.5 * (l - p) / d if d else 0.0)
+        left, mid, right = arr[(v - 1) % n], arr[v], arr[(v + 1) % n]
+        d = left - 2 * mid + right
+        return v + (0.5 * (left - right) / d if d else 0.0)
 
     sy = refine(y, a.shape[0], c[:, x])
     sx = refine(x, a.shape[1], c[y, :])

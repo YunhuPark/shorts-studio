@@ -5,6 +5,8 @@ import type { NextConfig } from "next";
 const API_ORIGIN = process.env.API_ORIGIN ?? "http://127.0.0.1:8765";
 
 const nextConfig: NextConfig = {
+  // end-to-end tests build into their own folder so they never disturb a running dev server
+  distDir: process.env.NEXT_DIST_DIR ?? ".next",
   cacheComponents: true,
   partialPrefetching: true,
   async rewrites() {

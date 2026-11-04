@@ -12,3 +12,7 @@ serve/
 
 # local dashboard data (projects, caches, spend ledger)
 .data/
+
+# face models are downloaded by `fetch-models` (checked against sha256), not stored in git
+assets/models/*.onnx
+assets/models/*.part

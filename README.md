@@ -66,6 +66,23 @@ npm --prefix frontend run dev -- -p 3010                        # UI -> http://l
 - Edits are written to `storyboard.json` atomically and the previous version is kept as `storyboard.json.bak`.
 - Tests: `.venv/Scripts/python -m unittest discover -s tests`; frontend: `cd frontend && npx tsc --noEmit && npx next build`.
 
+## Quality tooling
+```bash
+.venv/Scripts/python -m pip install -e ".[api,vision,dev]"      # + opencv-python-headless, ruff
+.venv/Scripts/ruff check .                                       # lint (config in pyproject.toml)
+.venv/Scripts/python -m unittest discover -s tests               # 87 tests
+
+python -m shorts_studio fetch-models                             # YuNet + SFace (~37 MB, sha256-checked, not in git)
+python -m shorts_studio face-check examples/convenience-store/storyboard.json --images <folder>     --reference grandpa=<folder>/cut05.png --reference alba=<folder>/cut13.png
+
+cd frontend && npx playwright install chromium && npm run test:e2e   # 11 browser tests, fake providers, no real keys
+```
+`face-check` assigns every face in a shot to the closest reference character and flags faces that match nobody
+(`drift?`) or are too small to judge (`small`). It is reliable for frontal faces; profiles, overhead and back views
+often score low, so use it to pick shots for a human to look at, not to reject them automatically.
+The E2E tests run against a private API (`tests/e2e_server.py`) and a separate build folder (`.next-e2e`), so they never
+touch your data, real keys, or a dev server you have open.
+
 ## Fonts
 Subtitles need a Korean bold font. Resolution order: `--font`, `SHORTS_FONT`, `assets/fonts/Pretendard*Bold*` or
 `NotoSansKR*Bold*`, then Windows Malgun Gothic (development fallback only — not redistributable in a hosted service).

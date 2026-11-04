@@ -35,12 +35,13 @@ class Explicit(unittest.TestCase):
     def test_explicit_path_wins(self):
         self.assertEqual(resolve_font(__file__), __file__)
 
-    def test_missing_font_is_a_clear_error(self):
-        # only meaningful when no env/bundled/dev font exists; otherwise resolution succeeds
+    def test_missing_explicit_font_falls_back_to_a_real_font_or_fails_clearly(self):
         try:
-            resolve_font("does-not-exist.ttf")
+            path = resolve_font("does-not-exist.ttf")
         except FileNotFoundError:
-            pass
+            return  # no fallback font on this machine: a clear error, not a silent bad path
+        self.assertNotEqual(path, "does-not-exist.ttf")
+        self.assertTrue(Path(path).exists())
 
 
 if __name__ == "__main__":

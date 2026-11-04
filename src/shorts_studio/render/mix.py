@@ -44,4 +44,4 @@ def build_audio(ffmpeg: str, items: list[tuple[float, Path]], total: float, chim
             labels.append(f"[ch{j}]")
     parts.append(f"{''.join(labels)}amix=inputs={len(labels)}:normalize=0:duration=longest,"
                  f"loudnorm=I=-16:TP=-1.5:LRA=11[out]")
-    run_ffmpeg(cmd + ["-filter_complex", ";".join(parts), "-map", "[out]", "-ar", "44100", str(out_wav)])
+    run_ffmpeg([*cmd, "-filter_complex", ";".join(parts), "-map", "[out]", "-ar", "44100", str(out_wav)])
