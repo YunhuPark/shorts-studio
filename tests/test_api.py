@@ -455,5 +455,34 @@ class Ownership(ApiTest):
         self.assertTrue((Path(self.tmp.name) / "data" / "users" / "alice" / "projects" / "demo").exists())
 
 
+class BgmStyle(ApiTest):
+    def setUp(self):
+        super().setUp()
+        self.styles_seen = []
+
+        def render(sb_, images, voices, out, opts, only, log):
+            self.styles_seen.append(opts.bgm_style)
+            Path(out).write_bytes(b"\x00\x00\x00\x18ftypmp42" + b"0" * 64)
+
+        self.client = TestClient(create_app(self.settings, Deps(self.images, FakeVoice(), render)))
+
+    def test_lists_the_available_styles_with_labels(self):
+        styles = self.client.get("/api/bgm-styles").json()
+        self.assertEqual({s["name"] for s in styles}, {"night_piano", "warm_major", "tense_low"})
+        self.assertTrue(all(s["label"] for s in styles))
+
+    def test_render_uses_the_chosen_style_and_defaults_to_the_original(self):
+        job = self.client.post("/api/projects/demo/render", json={"bgm_style": "tense_low"}).json()
+        self.wait_job(job["id"])
+        job = self.client.post("/api/projects/demo/render", json={}).json()
+        self.wait_job(job["id"])
+        self.assertEqual(self.styles_seen, ["tense_low", "night_piano"])
+
+    def test_unknown_style_is_rejected_before_anything_runs(self):
+        r = self.client.post("/api/projects/demo/render", json={"bgm_style": "jazz"})
+        self.assertEqual(r.status_code, 422)
+        self.assertEqual(self.styles_seen, [])
+
+
 if __name__ == "__main__":
     unittest.main()

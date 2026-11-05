@@ -26,6 +26,8 @@ from ..providers import AzureVoiceProvider, DirectoryImageSource, GeminiImagePro
 from ..qa import lint
 from ..render import RenderOptions
 from ..render import render as render_storyboard
+from ..render.bgm import DEFAULT_STYLE as DEFAULT_BGM_STYLE
+from ..render.bgm import STYLES as BGM_STYLES
 from ..render.subtitles import split_phrases
 from ..vision.faces import SAME_PERSON_COSINE, check_shots
 from ..vision.fetch import ModelError
@@ -110,6 +112,7 @@ class RegenBody(BaseModel):
 
 class RenderBody(BaseModel):
     only: list[int] | None = None
+    bgm_style: str = DEFAULT_BGM_STYLE
 
 
 def create_app(settings: Settings | None = None, deps: Deps | None = None) -> FastAPI:
@@ -235,6 +238,10 @@ def create_app(settings: Settings | None = None, deps: Deps | None = None) -> Fa
                 rgb.save(thumb, "JPEG", quality=84)
         return FileResponse(thumb, media_type="image/jpeg")
 
+    @app.get("/api/bgm-styles")
+    def list_bgm_styles() -> list[dict]:
+        return [{"name": k, "label": v.label} for k, v in BGM_STYLES.items()]
+
     @app.get("/api/voices")
     def list_voices() -> list[dict]:
         return VOICES
@@ -290,6 +297,8 @@ def create_app(settings: Settings | None = None, deps: Deps | None = None) -> Fa
 
     @app.post("/api/projects/{pid}/render", status_code=202)
     def start_render(pid: str, body: RenderBody, store: ProjectStore = Depends(get_store)) -> dict:
+        if body.bgm_style not in BGM_STYLES:
+            raise HTTPException(422, f"unknown bgm style; choose one of {sorted(BGM_STYLES)}")
         sb = store.load(pid)
         images_dir = store.images_dir(pid)
         only = set(body.only) if body.only else None
@@ -307,7 +316,7 @@ def create_app(settings: Settings | None = None, deps: Deps | None = None) -> Fa
                     done += 1
                 report(line, min(done / total, 0.95))
 
-            opts = RenderOptions(work_dir=store.work_dir(pid))
+            opts = RenderOptions(work_dir=store.work_dir(pid), bgm_style=body.bgm_style)
             voices = deps.voice_provider(tts_cache)
             deps.render_fn(sb, DirectoryImageSource(images_dir), voices, out, opts, only, log)
             return out.name

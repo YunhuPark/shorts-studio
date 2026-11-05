@@ -114,3 +114,16 @@ test("face check badges only the shots that feature a reference character", asyn
   await expect(card(page, 2).getByText("얼굴 일치", { exact: true })).toBeVisible();
   await expect(page.getByText("얼굴 일치", { exact: true })).toHaveCount(1); // shots 1, 3, 4 have no reference character
 });
+
+test("the background music is chosen before rendering and the choice is sent to the API", async ({ page }) => {
+  await openDemo(page);
+  const panel = page.locator("#render");
+  const select = panel.getByLabel("배경음악");
+  await expect(select.locator("option")).toHaveCount(3);
+  await expect(select).toHaveValue("night_piano"); // the original score stays the default
+  await select.selectOption("warm_major");
+  const request = page.waitForRequest((r) => r.url().endsWith("/api/projects/demo/render") && r.method() === "POST");
+  await panel.getByRole("button", { name: "영상 렌더 시작" }).click();
+  expect((await request).postDataJSON()).toMatchObject({ bgm_style: "warm_major" });
+  await expect(panel.locator("video")).toHaveAttribute("src", /render-/);
+});

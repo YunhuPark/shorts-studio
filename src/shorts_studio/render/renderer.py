@@ -32,6 +32,7 @@ class RenderOptions:
     font: str | None = None
     ffmpeg: str | None = None
     work_dir: Path = Path(".cache/work")
+    bgm_style: str = bgm.DEFAULT_STYLE
 
 
 @dataclass
@@ -161,9 +162,9 @@ def render(sb: Storyboard, images: ImageSource, voices: VoiceProvider, out_path:
     listing.write_text("".join(f"file '{c.resolve().as_posix()}'\n" for c in clips), encoding="utf-8")
     video = work / "video_only.mp4"
     run_ffmpeg([opts.ffmpeg, "-y", "-f", "concat", "-safe", "0", "-i", str(listing), "-c", "copy", str(video)])
-    score = work / f"bgm_{int(t)}.wav"
+    score = work / f"bgm_{opts.bgm_style}_{int(t)}.wav"
     if not score.exists():
-        bgm.compose(t, score)
+        bgm.compose(t, score, opts.bgm_style)
     mixed = work / "audio.wav"
     build_audio(opts.ffmpeg, audio_items, t, chime_at, score, mixed)
     run_ffmpeg([opts.ffmpeg, "-y", "-i", str(video), "-i", str(mixed), "-c:v", "libx264", "-crf", "22",

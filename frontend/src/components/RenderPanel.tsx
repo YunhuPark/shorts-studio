@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { api, ApiError, describe, RenderFile } from "@/lib/api";
+import { api, ApiError, BgmStyle, describe, RenderFile } from "@/lib/api";
 import { useJob } from "@/hooks/useJob";
 
 const fmtMb = (b: number) => `${(b / 1024 / 1024).toFixed(1)}MB`;
@@ -11,11 +11,16 @@ export function RenderPanel({ pid, azureReady }: { pid: string; azureReady: bool
   const [renders, setRenders] = useState<RenderFile[]>([]);
   const [jobId, setJobId] = useState<string | null>(null);
   const [error, setError] = useState("");
+  const [styles, setStyles] = useState<BgmStyle[]>([]);
+  const [style, setStyle] = useState("night_piano");
 
   const refresh = useCallback(() => {
     api.renders(pid).then(setRenders).catch(() => {});
   }, [pid]);
   useEffect(refresh, [refresh]);
+  useEffect(() => {
+    api.bgmStyles().then(setStyles).catch(() => {});
+  }, []);
 
   const job = useJob(jobId, (j) => {
     setJobId(null);
@@ -26,7 +31,7 @@ export function RenderPanel({ pid, azureReady }: { pid: string; azureReady: bool
   async function start() {
     setError("");
     try {
-      const j = await api.render(pid);
+      const j = await api.render(pid, undefined, style);
       setJobId(j.id);
     } catch (e) {
       setError(e instanceof ApiError ? describe(e.detail) : "렌더를 시작하지 못했습니다");
@@ -43,6 +48,12 @@ export function RenderPanel({ pid, azureReady }: { pid: string; azureReady: bool
         모든 컷을 이어 붙여 영상을 만듭니다. 21~26컷 기준으로 수 분이 걸리고, 처음 읽는 대사는 Azure 음성을 새로 만듭니다
         (월 무료 한도 안의 소량).
       </p>
+      <label className="field">
+        <span>배경음악</span>
+        <select value={style} onChange={(e) => setStyle(e.target.value)} disabled={running} aria-label="배경음악">
+          {styles.map((s) => <option key={s.name} value={s.name}>{s.label}</option>)}
+        </select>
+      </label>
       <div className="actions">
         <button className="primary" onClick={start} disabled={running || !azureReady} title={azureReady ? "" : "Azure 키가 필요합니다"}>
           {running ? "렌더 중…" : "영상 렌더 시작"}

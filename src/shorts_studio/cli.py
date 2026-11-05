@@ -10,6 +10,7 @@ from .models import Storyboard, VoiceSpec
 from .providers import AzureVoiceProvider, DirectoryImageSource, GeminiImageProvider, ProviderError
 from .qa import lint, missing_images
 from .render import RenderOptions, render
+from .render.bgm import STYLES as BGM_STYLES
 
 SAMPLE_TEXT = "오늘이 우리 결혼기념일이라서. 집사람 몫이야."
 SAMPLE_VOICES = ["ko-KR-BongJinNeural", "ko-KR-GookMinNeural", "ko-KR-HyunsuNeural",
@@ -31,9 +32,21 @@ def cmd_render(a: argparse.Namespace) -> int:
     if errors:
         print("\n".join(map(str, errors)), file=sys.stderr)
         return 2
-    opts = RenderOptions(work_dir=Path(a.work), font=a.font)
+    opts = RenderOptions(work_dir=Path(a.work), font=a.font, bgm_style=a.bgm_style)
     voices = AzureVoiceProvider(cache_dir=a.tts_cache or Path(a.work) / "tts")
     render(sb, DirectoryImageSource(a.images), voices, a.out, opts, parse_only(a.only))
+    return 0
+
+
+def cmd_bgm_sample(a: argparse.Namespace) -> int:
+    from .render import bgm
+    out = Path(a.out)
+    out.parent.mkdir(parents=True, exist_ok=True)
+    names = sorted(bgm.STYLES) if a.style == "all" else [a.style]
+    for name in names:
+        path = out if len(names) == 1 else out.with_name(f"{out.stem}_{name}{out.suffix}")
+        bgm.compose(a.seconds, path, name)
+        print(f"{name}: {bgm.STYLES[name].label} -> {path}")
     return 0
 
 
@@ -229,7 +242,14 @@ def main(argv: list[str] | None = None) -> int:
     r.add_argument("--font", help="subtitle font file (default: bundled font or SHORTS_FONT)")
     r.add_argument("--speaker-voice", action="append", metavar="WHO=VOICE", help="override a speaker's voice")
     r.add_argument("--speaker-rate", help="rate for overridden voices, e.g. -10%%")
+    r.add_argument("--bgm-style", default="night_piano", choices=sorted(BGM_STYLES), help="background score")
     r.set_defaults(fn=cmd_render)
+
+    b = sub.add_parser("bgm-sample", help="write the background score alone, to audition a style")
+    b.add_argument("--style", default="all", choices=["all", *sorted(BGM_STYLES)])
+    b.add_argument("--seconds", type=float, default=30)
+    b.add_argument("--out", default="output/bgm/bgm.wav")
+    b.set_defaults(fn=cmd_bgm_sample)
 
     lint_p = sub.add_parser("lint", help="check a storyboard")
     lint_p.add_argument("storyboard")

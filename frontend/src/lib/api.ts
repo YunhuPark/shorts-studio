@@ -59,6 +59,7 @@ export type FaceCheck = {
 export type FaceCheckResult = { threshold: number; checks: FaceCheck[] };
 
 export type RenderFile = { name: string; bytes: number; created: number };
+export type BgmStyle = { name: string; label: string };
 export type VoiceChoice = { name: string; gender: string; note: string };
 
 export class ApiError extends Error {
@@ -110,7 +111,9 @@ export const api = {
   voices: () => req<VoiceChoice[]>("/api/voices"),
   regenerate: (id: string, n: number) =>
     req<Job & { estimated_usd: number }>(`/api/projects/${id}/shots/${n}/regenerate`, body({ confirm: true })),
-  render: (id: string, only?: number[]) => req<Job>(`/api/projects/${id}/render`, body({ only: only ?? null })),
+  bgmStyles: () => req<BgmStyle[]>("/api/bgm-styles"),
+  render: (id: string, only?: number[], bgmStyle?: string) =>
+    req<Job>(`/api/projects/${id}/render`, body({ only: only ?? null, ...(bgmStyle ? { bgm_style: bgmStyle } : {}) })),
   faceCheck: (id: string) => req<FaceCheckResult>(`/api/projects/${id}/face-check`, { method: "POST", body: "{}" }),
   job: (jobId: string) => req<Job>(`/api/jobs/${jobId}`),
   renders: (id: string) => req<RenderFile[]>(`/api/projects/${id}/renders`),

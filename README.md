@@ -32,6 +32,8 @@ python -m shorts_studio lint examples/convenience-store/storyboard.json --images
 python -m shorts_studio render examples/convenience-store/storyboard.json --images <folder> --out output/short.mp4
 python -m shorts_studio render ... --only 5,14,16          # preview a few shots
 python -m shorts_studio voice-samples --out output/voice_samples
+python -m shorts_studio bgm-sample --seconds 30 --out output/bgm/bgm.wav   # audition the 3 score styles
+python -m shorts_studio render ... --bgm-style warm_major                    # night_piano (default) / warm_major / tense_low
 python -m shorts_studio image-consistency examples/convenience-store/storyboard.json \
     --character grandpa --shots 5,16,21 --model <gemini-image-model-id> [--dry-run]
 python -m shorts_studio generate examples/convenience-store/storyboard.json --images <folder> \
@@ -70,12 +72,12 @@ npm --prefix frontend run dev -- -p 3010                        # UI -> http://l
 ```bash
 .venv/Scripts/python -m pip install -e ".[api,vision,dev]"      # + opencv-python-headless, ruff
 .venv/Scripts/ruff check .                                       # lint (config in pyproject.toml)
-.venv/Scripts/python -m unittest discover -s tests               # 93 tests
+.venv/Scripts/python -m unittest discover -s tests               # 110 tests
 
 python -m shorts_studio fetch-models                             # YuNet + SFace (~37 MB, sha256-checked, not in git)
 python -m shorts_studio face-check examples/convenience-store/storyboard.json --images <folder>     --reference grandpa=<folder>/cut05.png --reference alba=<folder>/cut13.png
 
-cd frontend && npx playwright install chromium && npm run test:e2e   # 12 browser tests, fake providers, no real keys
+cd frontend && npx playwright install chromium && npm run test:e2e   # 13 browser tests, fake providers, no real keys
 ```
 `face-check` assigns every face in a shot to the closest reference character and flags faces that match nobody
 (`drift?`) or are too small to judge (`small`). It is reliable for frontal faces; profiles, overhead and back views
