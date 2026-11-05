@@ -77,6 +77,8 @@ class ApiTest(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self.tmp.cleanup)
+        self._stops = []
+        self.addCleanup(lambda: [stop() for stop in self._stops])
         root = Path(self.tmp.name)
         sb = root / "sb.json"
         sb.write_text(json.dumps(STORYBOARD, ensure_ascii=False), encoding="utf-8")
@@ -101,7 +103,18 @@ class ApiTest(unittest.TestCase):
 
         self.settings = Settings(root / "data", image_price_usd=0.05, daily_cap_usd=0.12,
                                  allowed_hosts=("testserver", "localhost"))
-        self.client = TestClient(create_app(self.settings, Deps(self.images, FakeVoice(), fake_render)))
+        self.use_app(Deps(self.images, FakeVoice(), fake_render))
+
+    def use_app(self, deps, settings=None):
+        """Replace the app under test. Apps on the same data folder share one job queue, so the previous app's
+        workers are stopped first (and every app's workers are stopped before the temp folder is removed)."""
+        for stop in self._stops:
+            stop()
+        self._stops.clear()
+        app = create_app(settings or self.settings, deps)
+        self._stops.append(app.state.stop_workers)
+        self.client = TestClient(app)
+        return self.client
 
     def wait_job(self, job_id, timeout=10):
         end = time.time() + timeout
@@ -312,8 +325,7 @@ class Rendering(ApiTest):
     def test_failed_job_reports_the_error(self):
         def boom(*a, **k):
             raise RuntimeError("ffmpeg exploded")
-        app = create_app(self.settings, Deps(self.images, FakeVoice(), boom))
-        c = TestClient(app)
+        c = self.use_app(Deps(self.images, FakeVoice(), boom))
         jid = c.post("/api/projects/demo/render", json={}).json()["id"]
         end = time.time() + 10
         while time.time() < end:
@@ -327,7 +339,7 @@ class Rendering(ApiTest):
 
 class FaceCheck(ApiTest):
     def client_with(self, embedder):
-        return TestClient(create_app(self.settings, Deps(self.images, FakeVoice(), lambda *a, **k: None, embedder)))
+        return self.use_app(Deps(self.images, FakeVoice(), lambda *a, **k: None, embedder))
 
     @staticmethod
     def fake_embedder(shot_vec):
@@ -407,7 +419,7 @@ class Ownership(ApiTest):
             Path(out).write_bytes(b"\x00\x00\x00\x18ftypmp42" + b"0" * 64)
 
         deps = Deps(self.images, FakeVoice(), render, owner=lambda request: request.headers.get("x-user", ""))
-        self.client = TestClient(create_app(self.settings, deps))
+        self.use_app(deps)
 
     def as_(self, who):
         return {"x-user": who}
@@ -464,7 +476,7 @@ class BgmStyle(ApiTest):
             self.styles_seen.append(opts.bgm_style)
             Path(out).write_bytes(b"\x00\x00\x00\x18ftypmp42" + b"0" * 64)
 
-        self.client = TestClient(create_app(self.settings, Deps(self.images, FakeVoice(), render)))
+        self.use_app(Deps(self.images, FakeVoice(), render))
 
     def test_lists_the_available_styles_with_labels(self):
         styles = self.client.get("/api/bgm-styles").json()
@@ -482,6 +494,70 @@ class BgmStyle(ApiTest):
         r = self.client.post("/api/projects/demo/render", json={"bgm_style": "jazz"})
         self.assertEqual(r.status_code, 422)
         self.assertEqual(self.styles_seen, [])
+
+
+class DurableJobs(ApiTest):
+    def queue(self):
+        from shorts_studio.api.jobqueue import JobQueue
+        return JobQueue(self.settings.root / "jobs.sqlite3")
+
+    def test_a_finished_job_is_still_there_after_the_api_restarts(self):
+        job = self.wait_job(self.client.post("/api/projects/demo/render", json={}).json()["id"])
+        self.assertEqual(job["state"], "done")
+        self.use_app(Deps(self.images, FakeVoice(), lambda *a, **k: None))   # a fresh API process on the same folder
+        again = self.client.get(f"/api/jobs/{job['id']}").json()
+        self.assertEqual((again["state"], again["result"]), ("done", job["result"]))
+        self.assertEqual(len(self.client.get("/api/projects/demo/jobs").json()), 1)
+
+    def test_a_regeneration_orphaned_by_a_crash_is_failed_and_its_reservation_refunded(self):
+        import contextlib
+        import sqlite3
+
+        from shorts_studio.api.spend import SpendLedger
+        ledger = SpendLedger(self.settings.root / "spend.jsonl")
+        for stop in self._stops:                                        # the running app would claim the job itself
+            stop()
+        self._stops.clear()
+        ledger.record("demo", 1, 0.05, "reserve")                       # the crashed API had reserved the spend
+        job = self.queue().submit("regenerate-1", "demo", "local", {"n": 1, "est": 0.05})
+        self.queue().claim("crashed-worker")
+        with contextlib.closing(sqlite3.connect(self.settings.root / "jobs.sqlite3")) as c, c:
+            c.execute("UPDATE jobs SET heartbeat=? WHERE id=?", (time.time() - 600, job.id))
+        self.assertEqual(ledger.today_total(), 0.05)
+
+        self.use_app(Deps(self.images, FakeVoice(), lambda *a, **k: None))   # restart: workers recover stale jobs
+        got = self.wait_job(job.id)
+        self.assertEqual(got["state"], "failed")
+        self.assertEqual(ledger.today_total(), 0.0)                          # reservation given back exactly once
+        self.assertEqual(self.client.get("/api/settings").json()["spent_today_usd"], 0.0)
+        time.sleep(0.5)
+        self.assertEqual(ledger.today_total(), 0.0)                          # and not refunded again by later passes
+
+    def test_api_without_workers_queues_and_a_separate_worker_runs_the_job(self):
+        from dataclasses import replace
+
+        from shorts_studio.api.handlers import JobContext, handle
+        from shorts_studio.api.spend import SpendLedger
+        from shorts_studio.api.worker import Worker
+
+        rendered = []
+
+        def render(sb_, images, voices, out, opts, only, log):
+            rendered.append(opts.bgm_style)
+            Path(out).write_bytes(b"\x00\x00\x00\x18ftypmp42" + b"0" * 64)
+
+        settings = replace(self.settings, embedded_workers=0)
+        self.use_app(Deps(self.images, FakeVoice(), render), settings)
+        queued = self.client.post("/api/projects/demo/render", json={"bgm_style": "warm_major"}).json()
+        time.sleep(0.6)
+        self.assertEqual(self.client.get(f"/api/jobs/{queued['id']}").json()["state"], "queued")  # nobody runs it
+
+        ctx = JobContext(settings.root, SpendLedger(settings.root / "spend.jsonl"), self.images, FakeVoice(), render)
+        Worker(self.queue(), lambda job, report: handle(ctx, job, report), name="other-process").run_one()
+        job = self.client.get(f"/api/jobs/{queued['id']}").json()
+        self.assertEqual(job["state"], "done", job)
+        self.assertEqual(rendered, ["warm_major"])
+        self.assertEqual(self.client.get("/api/projects/demo/renders").json()[0]["name"], job["result"])
 
 
 if __name__ == "__main__":

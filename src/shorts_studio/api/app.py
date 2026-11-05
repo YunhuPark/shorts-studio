@@ -9,7 +9,6 @@ from __future__ import annotations
 import os
 import re
 import threading
-import time
 from collections.abc import Callable
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
@@ -20,20 +19,20 @@ from fastapi.responses import FileResponse
 from PIL import Image
 from pydantic import BaseModel, Field
 
-from ..generate import plan_generation, run_generation
 from ..models import CAMERAS, Storyboard
 from ..providers import AzureVoiceProvider, DirectoryImageSource, GeminiImageProvider, ProviderError
 from ..qa import lint
-from ..render import RenderOptions
 from ..render import render as render_storyboard
 from ..render.bgm import DEFAULT_STYLE as DEFAULT_BGM_STYLE
 from ..render.bgm import STYLES as BGM_STYLES
 from ..render.subtitles import split_phrases
 from ..vision.faces import SAME_PERSON_COSINE, check_shots
 from ..vision.fetch import ModelError
-from .jobs import JobManager
+from .handlers import JobContext, handle, refund_orphan
+from .jobqueue import JobQueue
 from .spend import SpendLedger
 from .store import LOCAL_OWNER, OWNER, NotFound, ProjectStore
+from .worker import start_threads
 
 VOICE_RE = re.compile(r"^[a-z]{2}-[A-Z]{2}-[A-Za-z]+Neural$")
 RATE_RE = re.compile(r"^[+-]?\d{1,3}%$")
@@ -61,6 +60,7 @@ class Settings:
     daily_cap_usd: float = 2.0
     # Only answer requests addressed to localhost: blocks DNS-rebinding pages from driving paid actions.
     allowed_hosts: tuple[str, ...] = ("localhost", "127.0.0.1", "[::1]")
+    embedded_workers: int = 2        # job threads inside the API process; 0 = run separate `worker` processes
 
     @classmethod
     def from_env(cls) -> Settings:
@@ -119,12 +119,23 @@ def create_app(settings: Settings | None = None, deps: Deps | None = None) -> Fa
     settings = settings or Settings.from_env()
     deps = deps or Deps()
     stores: dict[str, ProjectStore] = {}
-    jobs = JobManager()
+    jobs = JobQueue(settings.root / "jobs.sqlite3")
     ledger = SpendLedger(settings.root / "spend.jsonl")
     spend_lock = threading.Lock()
     face_lock = threading.Lock()  # one face check at a time: it is CPU heavy
     tts_cache = settings.root / "cache" / "tts"
     app = FastAPI(title="shorts-studio local dashboard")
+    ctx = JobContext(settings.root, ledger, deps.image_provider, deps.voice_provider, deps.render_fn)
+    app.state.stop_workers = lambda: None
+    if settings.embedded_workers > 0:  # `serve --no-worker` leaves the queue to separate `worker` processes
+        stop, threads = start_threads(jobs, lambda job, report: handle(ctx, job, report),
+                                      lambda job: refund_orphan(ctx, job), settings.embedded_workers)
+
+        def stop_workers() -> None:
+            stop.set()
+            for t in threads:
+                t.join(timeout=5)
+        app.state.stop_workers = stop_workers
     app.add_middleware(TrustedHostMiddleware, allowed_hosts=list(settings.allowed_hosts))
 
     @app.exception_handler(NotFound)
@@ -266,33 +277,19 @@ def create_app(settings: Settings | None = None, deps: Deps | None = None) -> Fa
         est = settings.image_price_usd
         if not body.confirm:
             raise HTTPException(400, {"message": "confirm required", "estimated_usd": est})
-        s = store.settings(pid)
-        images_dir = store.images_dir(pid)
-        char_refs = {c: images_dir / f for c, f in s["char_refs"].items() if (images_dir / f).exists()}
-        shot_refs = {int(k): [images_dir / f for f in v if (images_dir / f).exists()]
-                     for k, v in s["shot_refs"].items()}
-        items = plan_generation(sb, DirectoryImageSource(images_dir), char_refs, shot_refs, {n}, {n})
-        model = s["model"]
-
-        def work(report) -> str:
-            report(f"generating shot {n} with {model}", 0.05)
-            try:
-                run_generation(items, deps.image_provider(model), images_dir, model,
-                               log=lambda line: report(line, 0.9))
-            except Exception:
-                ledger.record(pid, n, -est, "refund")  # nothing was produced, give the reservation back
-                raise
-            return f"cut{n:02d}.png"
-
-        with spend_lock:  # check, reserve and start atomically so quick repeated clicks cannot overshoot the cap
-            if jobs.active(pid, f"regenerate-{n}", store.owner):
+        kind = f"regenerate-{n}"
+        with spend_lock:  # check, reserve and enqueue atomically so quick repeated clicks cannot overshoot the cap
+            if jobs.active(pid, kind, store.owner):
                 raise HTTPException(409, f"shot {n} is already being regenerated")
             spent = ledger.today_total()
             if spent + est > settings.daily_cap_usd:
                 raise HTTPException(429, {"message": "daily spend cap reached", "spent_today_usd": spent,
                                           "daily_cap_usd": settings.daily_cap_usd})
             ledger.record(pid, n, est, "reserve")
-            job = jobs.submit(f"regenerate-{n}", pid, work, store.owner)
+            job = jobs.submit_unique(kind, pid, store.owner, {"n": n, "est": est})
+            if job is None:  # another process queued the same shot first
+                ledger.record(pid, n, -est, "refund")
+                raise HTTPException(409, f"shot {n} is already being regenerated")
         return job.public() | {"estimated_usd": est}
 
     @app.post("/api/projects/{pid}/render", status_code=202)
@@ -300,31 +297,15 @@ def create_app(settings: Settings | None = None, deps: Deps | None = None) -> Fa
         if body.bgm_style not in BGM_STYLES:
             raise HTTPException(422, f"unknown bgm style; choose one of {sorted(BGM_STYLES)}")
         sb = store.load(pid)
-        images_dir = store.images_dir(pid)
         only = set(body.only) if body.only else None
         total = sum(1 for sh in sb.shots if (only is None or sh.n in only) and store.image_path(pid, sh.n))
         if total == 0:
             raise HTTPException(422, "no shot has an image to render")
-        out = store.renders_dir(pid) / time.strftime("render-%Y%m%d-%H%M%S.mp4")
-
-        def work(report) -> str:
-            done = 0
-
-            def log(line: str) -> None:
-                nonlocal done
-                if line.startswith("shot"):
-                    done += 1
-                report(line, min(done / total, 0.95))
-
-            opts = RenderOptions(work_dir=store.work_dir(pid), bgm_style=body.bgm_style)
-            voices = deps.voice_provider(tts_cache)
-            deps.render_fn(sb, DirectoryImageSource(images_dir), voices, out, opts, only, log)
-            return out.name
-
-        with spend_lock:
-            if jobs.active(pid, "render", store.owner):
-                raise HTTPException(409, "a render is already running for this project")
-            return jobs.submit("render", pid, work, store.owner).public()
+        job = jobs.submit_unique("render", pid, store.owner,
+                                 {"only": sorted(only) if only else None, "bgm_style": body.bgm_style})
+        if job is None:
+            raise HTTPException(409, "a render is already running for this project")
+        return job.public()
 
     @app.post("/api/projects/{pid}/face-check")
     def face_check(pid: str, store: ProjectStore = Depends(get_store)) -> dict:

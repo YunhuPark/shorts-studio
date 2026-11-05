@@ -162,8 +162,37 @@ def cmd_serve(a: argparse.Namespace) -> int:
     from .api.app import Settings, create_app
     settings = Settings.from_env()
     settings.root = Path(a.data)
-    print(f"dashboard API: http://127.0.0.1:{a.port}  (data: {settings.root.resolve()})")
+    if a.no_worker:
+        settings.embedded_workers = 0
+    mode = "jobs run in separate `worker` processes" if a.no_worker else "jobs run inside this process"
+    print(f"dashboard API: http://127.0.0.1:{a.port}  (data: {settings.root.resolve()}; {mode})")
     uvicorn.run(create_app(settings), host="127.0.0.1", port=a.port, log_level="info")
+    return 0
+
+
+def cmd_worker(a: argparse.Namespace) -> int:
+    """Run a job worker in its own process (use with `serve --no-worker`, same --data folder)."""
+    import threading
+
+    from .api.app import Deps, Settings
+    from .api.handlers import JobContext, handle, refund_orphan
+    from .api.jobqueue import JobQueue
+    from .api.spend import SpendLedger
+    from .api.worker import Worker
+
+    settings = Settings.from_env()
+    settings.root = Path(a.data)
+    deps = Deps()
+    ctx = JobContext(settings.root, SpendLedger(settings.root / "spend.jsonl"), deps.image_provider,
+                     deps.voice_provider, deps.render_fn)
+    worker = Worker(JobQueue(settings.root / "jobs.sqlite3"), lambda job, report: handle(ctx, job, report),
+                    lambda job: refund_orphan(ctx, job))
+    print(f"worker {worker.id} waiting for jobs (data: {settings.root.resolve()}); Ctrl+C to stop")
+    stop = threading.Event()
+    try:
+        worker.run_forever(stop)
+    except KeyboardInterrupt:
+        stop.set()
     return 0
 
 
@@ -287,7 +316,13 @@ def main(argv: list[str] | None = None) -> int:
     s = sub.add_parser("serve", help="run the local dashboard API (localhost only)")
     s.add_argument("--data", default=".data", help="folder for projects, caches and the spend ledger")
     s.add_argument("--port", type=int, default=8765, help="(8000 is reserved by Windows on some machines)")
+    s.add_argument("--no-worker", action="store_true",
+                   help="do not run jobs in this process; start `worker` processes on the same --data folder")
     s.set_defaults(fn=cmd_serve)
+
+    w = sub.add_parser("worker", help="run a job worker in a separate process")
+    w.add_argument("--data", default=".data", help="same folder as `serve`")
+    w.set_defaults(fn=cmd_worker)
 
     i = sub.add_parser("import-project", help="create a dashboard project from a storyboard and images")
     i.add_argument("id", help="lowercase letters, digits and hyphens")

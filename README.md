@@ -65,6 +65,10 @@ npm --prefix frontend run dev -- -p 3010                        # UI -> http://l
   `.data/spend.jsonl` and holds estimates, not invoices.
 - Port 8000 is reserved by Windows on some machines (that is why the default is 8765). The frontend proxies `/api/*` to
   `API_ORIGIN` (default `http://127.0.0.1:8765`).
+- Jobs (image regeneration, render) are rows in `<data>/jobs.sqlite3`, so they survive restarts. By default two worker
+  threads run inside the API process. To run them elsewhere: `serve --no-worker` plus one or more
+  `python -m shorts_studio worker --data .data` in other terminals (same folder). A job whose worker died (no heartbeat
+  for 60 s) is marked failed and, for an image job, its reserved spend is refunded.
 - Edits are written to `storyboard.json` atomically and the previous version is kept as `storyboard.json.bak`.
 - Tests: `.venv/Scripts/python -m unittest discover -s tests`; frontend: `cd frontend && npx tsc --noEmit && npx next build`.
 
