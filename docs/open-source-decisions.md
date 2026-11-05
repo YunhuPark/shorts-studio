@@ -150,3 +150,14 @@
   세 컷을 눈으로 대조하니 모두 옆모습·뒷모습·위에서 내려다본 각도였고 옷·머리·안경은 같았다(컷 21은 0.357로 기준에 근소 차이).
   **정면 얼굴에서는 신뢰할 수 있고, 각도가 큰 컷은 보수적으로 의심 표시를 하는 도구**다. 자동 불합격 판정에는 쓰지 않고 사람이 볼 컷을 고르는 용도로 쓴다.
 - 임계값 0.363은 OpenCV가 공개한 사진 기준 값이라 생성 이미지에는 맞지 않을 수 있다.
+
+### 서비스 배포 전 라이선스 점검 (2026-11-05)
+`.venv`에 설치된 실제 패키지의 메타데이터와 동봉 라이선스 파일로 확인했다(법률 자문이 아님).
+- **opencv-python-headless 5.0.0.93:** 휠 포장은 MIT, OpenCV 본체는 Apache 2.0. 휠에 FFmpeg(LGPL 2.1, 동적 DLL로 분리), libpng·libwebp·libjpeg-turbo·protobuf·OpenJPEG(BSD 계열),
+  Intel IPP(Intel Simplified Software License, 재배포 허용·조건 있음)가 같이 들어 있다. 우리는 얼굴 인식(dnn)과 이미지 디코딩만 쓰며 영상 입출력(VideoIO)은 쓰지 않는다.
+  서버에서 돌리기만 하면 문제 없고, 바이너리를 배포(데스크톱 앱 등)한다면 `LICENSE-3RD-PARTY.txt` 동봉과 LGPL 고지가 필요하다.
+- **YuNet(MIT), SFace(Apache 2.0):** 모델 파일과 라이선스 사본을 `assets/models/`에 둔다.
+- **더 큰 쟁점 — imageio-ffmpeg의 ffmpeg 바이너리:** imageio-ffmpeg 0.7.0 자체는 BSD-2-Clause이지만 번들 ffmpeg(gyan.dev 7.1 essentials)는 `--enable-gpl --enable-libx264 --enable-libx265`로 빌드된 **GPL 빌드**다.
+  - 서버에서 실행만 하고 바이너리를 배포하지 않으면 GPL 배포 의무는 생기지 않는다. 사용자에게 설치형으로 배포하면 GPL 소스 제공 의무가 생기므로 그때는 LGPL 빌드로 바꾸거나 소스를 제공해야 한다.
+  - H.264(x264) 인코딩은 특허 풀(MPEG LA 등) 이슈가 별도로 있다. 상용 서비스 전에 확인이 필요하다.
+- 결론: **호스팅형 서비스로 운영하는 한 현재 구성은 진행 가능**하다. 설치형 배포나 상용 출시 전에는 ffmpeg 빌드(LGPL 대체)와 H.264 특허를 먼저 정리한다.
