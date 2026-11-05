@@ -72,6 +72,18 @@ npm --prefix frontend run dev -- -p 3010                        # UI -> http://l
 - Edits are written to `storyboard.json` atomically and the previous version is kept as `storyboard.json.bak`.
 - Tests: `.venv/Scripts/python -m unittest discover -s tests`; frontend: `cd frontend && npx tsc --noEmit && npx next build`.
 
+## Hosted mode: login (backend)
+The dashboard runs as one fixed local user by default (safe only on localhost). With login tokens configured, every
+route except `/api/health` needs `Authorization: Bearer <Supabase access token>` and each user sees only their own data.
+```bash
+pip install -e ".[api,auth]"
+set SUPABASE_URL=https://<project>.supabase.co          # public keys (ES256/RS256) are fetched from <url>/auth/v1/.well-known/jwks.json
+set SUPABASE_JWT_SECRET=...                              # only for projects that still sign with the shared HS256 secret
+set SHORTS_ALLOWED_HOSTS=studio.example.com              # the site's public host name(s)
+```
+Expiry, audience (`authenticated`) and issuer are checked, and the accepted algorithms are fixed by the mode you configure.
+The browser login screen is not built yet, so only API clients can sign in for now.
+
 ## Quality tooling
 ```bash
 .venv/Scripts/python -m pip install -e ".[api,vision,dev]"      # + opencv-python-headless, ruff

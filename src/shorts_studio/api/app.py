@@ -28,6 +28,7 @@ from ..render.bgm import STYLES as BGM_STYLES
 from ..render.subtitles import split_phrases
 from ..vision.faces import SAME_PERSON_COSINE, check_shots
 from ..vision.fetch import ModelError
+from .auth import AuthConfig, make_owner_resolver
 from .handlers import JobContext, handle, refund_orphan
 from .jobqueue import JobQueue
 from .spend import SpendLedger
@@ -60,13 +61,17 @@ class Settings:
     daily_cap_usd: float = 2.0
     # Only answer requests addressed to localhost: blocks DNS-rebinding pages from driving paid actions.
     allowed_hosts: tuple[str, ...] = ("localhost", "127.0.0.1", "[::1]")
+    auth: AuthConfig | None = None   # None: one fixed local user (safe only on localhost); else verify login tokens
     embedded_workers: int = 2        # job threads inside the API process; 0 = run separate `worker` processes
 
     @classmethod
     def from_env(cls) -> Settings:
+        hosts = tuple(h.strip() for h in os.environ.get("SHORTS_ALLOWED_HOSTS", "").split(",") if h.strip())
+        extra = {"allowed_hosts": hosts} if hosts else {}   # hosted: the public host name(s) of the site
         return cls(Path(os.environ.get("SHORTS_DATA", ".data")),
                    float(os.environ.get("SHORTS_IMAGE_PRICE_USD", "0.067")),
-                   float(os.environ.get("SHORTS_DAILY_CAP_USD", "2.0")))
+                   float(os.environ.get("SHORTS_DAILY_CAP_USD", "2.0")),
+                   auth=AuthConfig.from_env(), **extra)
 
 
 @dataclass
@@ -119,6 +124,7 @@ def create_app(settings: Settings | None = None, deps: Deps | None = None) -> Fa
     settings = settings or Settings.from_env()
     deps = deps or Deps()
     stores: dict[str, ProjectStore] = {}
+    resolve_owner = make_owner_resolver(settings.auth) if settings.auth else deps.owner
     jobs = JobQueue(settings.root / "jobs.sqlite3")
     ledger = SpendLedger(settings.root / "spend.jsonl")
     spend_lock = threading.Lock()
@@ -144,7 +150,7 @@ def create_app(settings: Settings | None = None, deps: Deps | None = None) -> Fa
         return JSONResponse({"detail": f"not found: {exc.args[0]}"}, status_code=404)
 
     def get_owner(request: Request) -> str:
-        owner = deps.owner(request)
+        owner = resolve_owner(request)
         if not isinstance(owner, str) or not OWNER.match(owner):
             raise HTTPException(401, "not signed in")
         return owner
@@ -177,7 +183,7 @@ def create_app(settings: Settings | None = None, deps: Deps | None = None) -> Fa
         return {"ok": True}
 
     @app.get("/api/settings")
-    def get_settings() -> dict:
+    def get_settings(owner: str = Depends(get_owner)) -> dict:
         return {"image_price_usd": settings.image_price_usd, "daily_cap_usd": settings.daily_cap_usd,
                 "spent_today_usd": ledger.today_total(),
                 "keys": {"azure": bool(os.environ.get("AZURE_SPEECH_KEY") and os.environ.get("AZURE_SPEECH_REGION")),
@@ -229,7 +235,7 @@ def create_app(settings: Settings | None = None, deps: Deps | None = None) -> Fa
         return asdict(sb.voices[who])
 
     @app.post("/api/subtitles/preview")
-    def preview(body: PreviewBody) -> dict:
+    def preview(body: PreviewBody, owner: str = Depends(get_owner)) -> dict:
         return {"phrases": split_phrases(body.text)}
 
     @app.get("/api/projects/{pid}/images/{n}")
@@ -250,15 +256,15 @@ def create_app(settings: Settings | None = None, deps: Deps | None = None) -> Fa
         return FileResponse(thumb, media_type="image/jpeg")
 
     @app.get("/api/bgm-styles")
-    def list_bgm_styles() -> list[dict]:
+    def list_bgm_styles(owner: str = Depends(get_owner)) -> list[dict]:
         return [{"name": k, "label": v.label} for k, v in BGM_STYLES.items()]
 
     @app.get("/api/voices")
-    def list_voices() -> list[dict]:
+    def list_voices(owner: str = Depends(get_owner)) -> list[dict]:
         return VOICES
 
     @app.get("/api/voices/sample")
-    def voice_sample(voice: str, rate: str = "-10%", text: str = SAMPLE_TEXT):
+    def voice_sample(voice: str, rate: str = "-10%", text: str = SAMPLE_TEXT, owner: str = Depends(get_owner)):
         if voice not in VOICE_NAMES or not RATE_RE.match(rate) or not (0 < len(text) <= 120):
             raise HTTPException(422, "unknown voice, invalid rate, or text longer than 120 characters")
         from ..models import VoiceSpec
