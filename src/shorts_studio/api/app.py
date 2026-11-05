@@ -14,7 +14,7 @@ from collections.abc import Callable
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
-from fastapi import FastAPI, HTTPException
+from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.middleware.trustedhost import TrustedHostMiddleware
 from fastapi.responses import FileResponse
 from PIL import Image
@@ -31,7 +31,7 @@ from ..vision.faces import SAME_PERSON_COSINE, check_shots
 from ..vision.fetch import ModelError
 from .jobs import JobManager
 from .spend import SpendLedger
-from .store import NotFound, ProjectStore
+from .store import LOCAL_OWNER, OWNER, NotFound, ProjectStore
 
 VOICE_RE = re.compile(r"^[a-z]{2}-[A-Z]{2}-[A-Za-z]+Neural$")
 RATE_RE = re.compile(r"^[+-]?\d{1,3}%$")
@@ -74,6 +74,9 @@ class Deps:
     voice_provider: Callable = field(default=lambda cache: AzureVoiceProvider(cache))
     render_fn: Callable = field(default=render_storyboard)
     embedder: Callable = field(default=lambda: _opencv_embedder())
+    # Who is calling? Local mode has one fixed user; a hosted deployment plugs in token verification here and
+    # returns the authenticated user id (or raises HTTPException 401).
+    owner: Callable[[Request], str] = field(default=lambda request: LOCAL_OWNER)
 
 
 def _opencv_embedder():
@@ -112,7 +115,7 @@ class RenderBody(BaseModel):
 def create_app(settings: Settings | None = None, deps: Deps | None = None) -> FastAPI:
     settings = settings or Settings.from_env()
     deps = deps or Deps()
-    store = ProjectStore(settings.root)
+    stores: dict[str, ProjectStore] = {}
     jobs = JobManager()
     ledger = SpendLedger(settings.root / "spend.jsonl")
     spend_lock = threading.Lock()
@@ -126,20 +129,32 @@ def create_app(settings: Settings | None = None, deps: Deps | None = None) -> Fa
         from fastapi.responses import JSONResponse
         return JSONResponse({"detail": f"not found: {exc.args[0]}"}, status_code=404)
 
-    def shot_view(sb: Storyboard, shot, pid: str) -> dict:
+    def get_owner(request: Request) -> str:
+        owner = deps.owner(request)
+        if not isinstance(owner, str) or not OWNER.match(owner):
+            raise HTTPException(401, "not signed in")
+        return owner
+
+    def get_store(owner: str = Depends(get_owner)) -> ProjectStore:
+        with spend_lock:
+            if owner not in stores:
+                stores[owner] = ProjectStore(settings.root, owner)
+            return stores[owner]
+
+    def shot_view(store: ProjectStore, sb: Storyboard, shot, pid: str) -> dict:
         img = store.image_path(pid, shot.n)
         return {**asdict(shot), "has_image": img is not None,
                 "image_version": int(img.stat().st_mtime) if img else None,
                 "phrases": split_phrases(shot.text)}
 
-    def project_payload(pid: str) -> dict:
+    def project_payload(store: ProjectStore, pid: str) -> dict:
         sb = store.load(pid)
         s = store.settings(pid)
         return {"id": pid, "title": sb.title, "logline": sb.logline,
                 "voices": {k: asdict(v) for k, v in sb.voices.items()},
                 "characters": sb.characters, "style": sb.style, "place": sb.place,
                 "cameras": list(CAMERAS),
-                "shots": [shot_view(sb, sh, pid) for sh in sb.shots],
+                "shots": [shot_view(store, sb, sh, pid) for sh in sb.shots],
                 "issues": [{"level": i.level, "shot": i.shot, "message": i.message} for i in lint(sb)],
                 "settings": {"model": s["model"], "char_refs": s["char_refs"], "shot_refs": s["shot_refs"]}}
 
@@ -155,7 +170,7 @@ def create_app(settings: Settings | None = None, deps: Deps | None = None) -> Fa
                          "gemini": bool(os.environ.get("GEMINI_API_KEY"))}}
 
     @app.get("/api/projects")
-    def list_projects() -> list[dict]:
+    def list_projects(store: ProjectStore = Depends(get_store)) -> list[dict]:
         out = []
         for pid in store.ids():
             sb = store.load(pid)
@@ -164,11 +179,11 @@ def create_app(settings: Settings | None = None, deps: Deps | None = None) -> Fa
         return out
 
     @app.get("/api/projects/{pid}")
-    def get_project(pid: str) -> dict:
-        return project_payload(pid)
+    def get_project(pid: str, store: ProjectStore = Depends(get_store)) -> dict:
+        return project_payload(store, pid)
 
     @app.patch("/api/projects/{pid}/shots/{n}")
-    def patch_shot(pid: str, n: int, patch: ShotPatch) -> dict:
+    def patch_shot(pid: str, n: int, patch: ShotPatch, store: ProjectStore = Depends(get_store)) -> dict:
         sb = store.load(pid)
         shot = sb.shot(n)
         if shot is None:
@@ -185,10 +200,10 @@ def create_app(settings: Settings | None = None, deps: Deps | None = None) -> Fa
                 value = [h.strip() for h in value if h.strip()]
             setattr(shot, key, value if value is not None or key == "min_dur" else getattr(shot, key))
         store.save(pid, sb)
-        return shot_view(sb, shot, pid)
+        return shot_view(store, sb, shot, pid)
 
     @app.put("/api/projects/{pid}/voices/{who}")
-    def set_voice(pid: str, who: str, body: VoiceBody) -> dict:
+    def set_voice(pid: str, who: str, body: VoiceBody, store: ProjectStore = Depends(get_store)) -> dict:
         sb = store.load(pid)
         if who not in sb.voices:
             raise HTTPException(404, f"speaker '{who}' not found")
@@ -204,7 +219,7 @@ def create_app(settings: Settings | None = None, deps: Deps | None = None) -> Fa
         return {"phrases": split_phrases(body.text)}
 
     @app.get("/api/projects/{pid}/images/{n}")
-    def get_image(pid: str, n: int, w: int | None = None):
+    def get_image(pid: str, n: int, w: int | None = None, store: ProjectStore = Depends(get_store)):
         path = store.image_path(pid, n)
         if path is None:
             raise HTTPException(404, "no image for this shot")
@@ -236,7 +251,7 @@ def create_app(settings: Settings | None = None, deps: Deps | None = None) -> Fa
         return FileResponse(wav, media_type="audio/wav")
 
     @app.post("/api/projects/{pid}/shots/{n}/regenerate", status_code=202)
-    def regenerate(pid: str, n: int, body: RegenBody) -> dict:
+    def regenerate(pid: str, n: int, body: RegenBody, store: ProjectStore = Depends(get_store)) -> dict:
         sb = store.load(pid)
         shot = sb.shot(n)
         if shot is None:
@@ -263,18 +278,18 @@ def create_app(settings: Settings | None = None, deps: Deps | None = None) -> Fa
             return f"cut{n:02d}.png"
 
         with spend_lock:  # check, reserve and start atomically so quick repeated clicks cannot overshoot the cap
-            if jobs.active(pid, f"regenerate-{n}"):
+            if jobs.active(pid, f"regenerate-{n}", store.owner):
                 raise HTTPException(409, f"shot {n} is already being regenerated")
             spent = ledger.today_total()
             if spent + est > settings.daily_cap_usd:
                 raise HTTPException(429, {"message": "daily spend cap reached", "spent_today_usd": spent,
                                           "daily_cap_usd": settings.daily_cap_usd})
             ledger.record(pid, n, est, "reserve")
-            job = jobs.submit(f"regenerate-{n}", pid, work)
+            job = jobs.submit(f"regenerate-{n}", pid, work, store.owner)
         return job.public() | {"estimated_usd": est}
 
     @app.post("/api/projects/{pid}/render", status_code=202)
-    def start_render(pid: str, body: RenderBody) -> dict:
+    def start_render(pid: str, body: RenderBody, store: ProjectStore = Depends(get_store)) -> dict:
         sb = store.load(pid)
         images_dir = store.images_dir(pid)
         only = set(body.only) if body.only else None
@@ -298,12 +313,12 @@ def create_app(settings: Settings | None = None, deps: Deps | None = None) -> Fa
             return out.name
 
         with spend_lock:
-            if jobs.active(pid, "render"):
+            if jobs.active(pid, "render", store.owner):
                 raise HTTPException(409, "a render is already running for this project")
-            return jobs.submit("render", pid, work).public()
+            return jobs.submit("render", pid, work, store.owner).public()
 
     @app.post("/api/projects/{pid}/face-check")
-    def face_check(pid: str) -> dict:
+    def face_check(pid: str, store: ProjectStore = Depends(get_store)) -> dict:
         """Free, local: compares the faces in each shot with the project's character reference images."""
         sb = store.load(pid)
         images_dir = store.images_dir(pid)
@@ -324,24 +339,24 @@ def create_app(settings: Settings | None = None, deps: Deps | None = None) -> Fa
                         "small": f.small} for f in c.faces]} for c in checks]}
 
     @app.get("/api/jobs/{job_id}")
-    def get_job(job_id: str) -> dict:
+    def get_job(job_id: str, owner: str = Depends(get_owner)) -> dict:
         job = jobs.get(job_id)
-        if job is None:
+        if job is None or job.owner != owner:  # another user's job looks the same as a missing one
             raise HTTPException(404, "job not found")
         return job.public()
 
     @app.get("/api/projects/{pid}/jobs")
-    def project_jobs(pid: str) -> list[dict]:
+    def project_jobs(pid: str, store: ProjectStore = Depends(get_store)) -> list[dict]:
         store.dir(pid)
-        return [j.public() for j in jobs.list(pid)]
+        return [j.public() for j in jobs.list(pid, store.owner)]
 
     @app.get("/api/projects/{pid}/renders")
-    def list_renders(pid: str) -> list[dict]:
+    def list_renders(pid: str, store: ProjectStore = Depends(get_store)) -> list[dict]:
         files = sorted(store.renders_dir(pid).glob("render-*.mp4"), reverse=True)
         return [{"name": f.name, "bytes": f.stat().st_size, "created": f.stat().st_mtime} for f in files]
 
     @app.get("/api/projects/{pid}/renders/{name}")
-    def get_render(pid: str, name: str):
+    def get_render(pid: str, name: str, store: ProjectStore = Depends(get_store)):
         if not RENDER_RE.match(name):
             raise HTTPException(404, "not found")
         path = store.renders_dir(pid) / name

@@ -393,5 +393,67 @@ class FaceCheck(ApiTest):
         self.assertEqual(self.client.post("/api/projects/nope/face-check").status_code, 404)
 
 
+class Ownership(ApiTest):
+    """Every request belongs to one owner; one owner must never see or touch another's projects or jobs."""
+
+    def setUp(self):
+        super().setUp()
+        root = Path(self.tmp.name)
+        for who in ("alice", "bob"):
+            ProjectStore(root / "data", who).create("demo", root / "sb.json", root / "imgs",
+                                                    {"char_refs": {"grandpa": "cut02.png"}})
+
+        def render(sb_, images, voices, out, opts, only, log):
+            Path(out).write_bytes(b"\x00\x00\x00\x18ftypmp42" + b"0" * 64)
+
+        deps = Deps(self.images, FakeVoice(), render, owner=lambda request: request.headers.get("x-user", ""))
+        self.client = TestClient(create_app(self.settings, deps))
+
+    def as_(self, who):
+        return {"x-user": who}
+
+    def test_each_owner_sees_only_their_own_projects(self):
+        ProjectStore(Path(self.tmp.name) / "data", "alice").create(
+            "alices-only", Path(self.tmp.name) / "sb.json", Path(self.tmp.name) / "imgs")
+        alice = [p["id"] for p in self.client.get("/api/projects", headers=self.as_("alice")).json()]
+        bob = [p["id"] for p in self.client.get("/api/projects", headers=self.as_("bob")).json()]
+        self.assertEqual(alice, ["alices-only", "demo"])
+        self.assertEqual(bob, ["demo"])
+        self.assertEqual(self.client.get("/api/projects/alices-only", headers=self.as_("bob")).status_code, 404)
+
+    def test_same_project_id_is_independent_per_owner(self):
+        r = self.client.patch("/api/projects/demo/shots/1", json={"text": "alice edit"}, headers=self.as_("alice"))
+        self.assertEqual(r.status_code, 200)
+        bob = self.client.get("/api/projects/demo", headers=self.as_("bob")).json()
+        self.assertEqual(bob["shots"][0]["text"], "저기, 오늘은 두 개네요?")
+
+    def test_other_owners_job_looks_missing(self):
+        job = self.client.post("/api/projects/demo/render", json={}, headers=self.as_("alice")).json()
+        self.assertEqual(self.client.get(f"/api/jobs/{job['id']}", headers=self.as_("alice")).status_code, 200)
+        self.assertEqual(self.client.get(f"/api/jobs/{job['id']}", headers=self.as_("bob")).status_code, 404)
+        self.assertEqual(self.client.get("/api/projects/demo/jobs", headers=self.as_("bob")).json(), [])
+
+    def test_a_running_render_of_one_owner_does_not_block_the_other(self):
+        self.render_hold = None
+        first = self.client.post("/api/projects/demo/render", json={}, headers=self.as_("alice"))
+        second = self.client.post("/api/projects/demo/render", json={}, headers=self.as_("bob"))
+        self.assertEqual((first.status_code, second.status_code), (202, 202))
+
+    def test_missing_or_malformed_identity_is_rejected(self):
+        for who in ("", "../alice", "a/b", "x" * 80):
+            r = self.client.get("/api/projects", headers=self.as_(who))
+            self.assertEqual(r.status_code, 401, who)
+
+    def test_owner_id_cannot_escape_the_data_folder(self):
+        for bad in ("..", "../x", "a/b", "", "a b"):
+            with self.assertRaises(ValueError):
+                ProjectStore(Path(self.tmp.name) / "data", bad)
+
+    def test_local_owner_keeps_the_original_folder_layout(self):
+        local = Path(self.tmp.name) / "data" / "projects" / "demo" / "storyboard.json"
+        self.assertTrue(local.exists())
+        self.assertTrue((Path(self.tmp.name) / "data" / "users" / "alice" / "projects" / "demo").exists())
+
+
 if __name__ == "__main__":
     unittest.main()

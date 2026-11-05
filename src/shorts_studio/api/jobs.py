@@ -17,6 +17,7 @@ class Job:
     id: str
     kind: str
     project: str
+    owner: str = "local"
     state: str = "queued"  # queued | running | done | failed
     progress: float = 0.0
     log: list[str] = field(default_factory=list)
@@ -36,8 +37,8 @@ class JobManager:
         self._jobs: dict[str, Job] = {}
         self._lock = threading.Lock()
 
-    def submit(self, kind: str, project: str, fn: Callable[[Report], str | None]) -> Job:
-        job = Job(uuid.uuid4().hex[:10], kind, project)
+    def submit(self, kind: str, project: str, fn: Callable[[Report], str | None], owner: str = "local") -> Job:
+        job = Job(uuid.uuid4().hex[:10], kind, project, owner)
         with self._lock:
             self._jobs[job.id] = job
 
@@ -62,12 +63,13 @@ class JobManager:
     def get(self, job_id: str) -> Job | None:
         return self._jobs.get(job_id)
 
-    def active(self, project: str, kind: str) -> Job | None:
+    def active(self, project: str, kind: str, owner: str = "local") -> Job | None:
         with self._lock:
             return next((j for j in self._jobs.values()
-                         if j.project == project and j.kind == kind and j.state in ("queued", "running")), None)
+                         if j.owner == owner and j.project == project and j.kind == kind
+                         and j.state in ("queued", "running")), None)
 
-    def list(self, project: str | None = None) -> list[Job]:
+    def list(self, project: str | None = None, owner: str = "local") -> list[Job]:
         with self._lock:
-            jobs = [j for j in self._jobs.values() if project is None or j.project == project]
+            jobs = [j for j in self._jobs.values() if j.owner == owner and (project is None or j.project == project)]
         return sorted(jobs, key=lambda j: j.created, reverse=True)
