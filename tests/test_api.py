@@ -325,5 +325,73 @@ class Rendering(ApiTest):
         self.assertIn("ffmpeg exploded", job["error"])
 
 
+class FaceCheck(ApiTest):
+    def client_with(self, embedder):
+        return TestClient(create_app(self.settings, Deps(self.images, FakeVoice(), lambda *a, **k: None, embedder)))
+
+    @staticmethod
+    def fake_embedder(shot_vec):
+        """Reference image (cut02) and the shot image are the same file here; shot_vec decides what the shot shows."""
+        import numpy as np
+
+        from shorts_studio.vision.faces import Face
+
+        class E:
+            def embed_all(self, path):
+                vec = shot_vec if Path(path).name != "cut02.png" or shot_vec is None else [1.0, 0.0]
+                return [] if vec is None else [Face(np.array(vec), 0.99, (0, 0, 100, 200))]
+        return lambda: E()
+
+    def test_matching_face_is_ok(self):
+        r = self.client_with(self.fake_embedder([1.0, 0.0])).post("/api/projects/demo/face-check")
+        self.assertEqual(r.status_code, 200, r.text)
+        checks = r.json()["checks"]
+        self.assertEqual([c["shot"] for c in checks], [2])   # only shots that feature a reference character
+        self.assertEqual(checks[0]["status"], "ok")
+        self.assertEqual(checks[0]["faces"][0]["character"], "grandpa")
+
+    def test_face_that_matches_nobody_is_flagged(self):
+        # the reference file and the shot file are the same image, so make the reference vector differ by name
+        import numpy as np
+
+        from shorts_studio.vision.faces import Face
+        calls = []
+
+        class E:
+            def embed_all(self, path):
+                calls.append(Path(path).name)
+                return [Face(np.array([1.0, 0.0] if len(calls) == 1 else [0.0, 1.0]), 0.99, (0, 0, 100, 200))]
+        r = self.client_with(lambda: E()).post("/api/projects/demo/face-check")
+        self.assertEqual(r.json()["checks"][0]["status"], "drift?")
+
+    def test_shot_without_a_face(self):
+        import numpy as np
+
+        from shorts_studio.vision.faces import Face
+        calls = []
+
+        class E:
+            def embed_all(self, path):
+                calls.append(1)
+                return [Face(np.array([1.0, 0.0]), 0.99, (0, 0, 100, 200))] if len(calls) == 1 else []
+        r = self.client_with(lambda: E()).post("/api/projects/demo/face-check")
+        self.assertEqual(r.json()["checks"][0]["status"], "no face")
+
+    def test_needs_reference_images(self):
+        self.store.save_settings("demo", {**self.store.settings("demo"), "char_refs": {}})
+        r = self.client_with(self.fake_embedder([1.0, 0.0])).post("/api/projects/demo/face-check")
+        self.assertEqual(r.status_code, 422)
+
+    def test_missing_vision_support_is_a_clear_503(self):
+        def no_cv2():
+            raise ImportError("No module named 'cv2'")
+        r = self.client_with(no_cv2).post("/api/projects/demo/face-check")
+        self.assertEqual(r.status_code, 503)
+        self.assertIn("not available", r.json()["detail"])
+
+    def test_unknown_project_is_404(self):
+        self.assertEqual(self.client.post("/api/projects/nope/face-check").status_code, 404)
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -69,6 +69,9 @@ input[aria-invalid="true"] { border-color: var(--danger); }
 .thumb { display: block; width: 100%; padding: 0; border: 0; border-radius: 0; background: #000; cursor: zoom-in; }
 .thumb img { display: block; width: 100%; max-height: 420px; object-fit: contain; }
 .thumb.empty { display: grid; place-items: center; min-height: 200px; color: var(--muted); cursor: default; }
+.badge.face { left: auto; right: 8px; }
+.badge.face.ok { color: var(--ok); }
+.badge.face.warn { color: #ffd60a; }
 .badge { position: absolute; top: 8px; left: 8px; background: rgba(0, 0, 0, 0.7); padding: 2px 8px; border-radius: 6px; font-size: 0.8rem; }
 .overlay { position: absolute; inset: 0; background: rgba(0, 0, 0, 0.65); display: grid; place-content: center; gap: 8px; text-align: center; }
 .spinner { width: 28px; height: 28px; margin: 0 auto; border: 3px solid #444; border-top-color: var(--accent); border-radius: 50%; animation: spin 0.9s linear infinite; }

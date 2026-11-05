@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { api, ApiError, CAMERA_LABELS, describe, imageUrl, Shot } from "@/lib/api";
+import { api, ApiError, CAMERA_LABELS, describe, FaceCheck, FaceStatus, imageUrl, Shot } from "@/lib/api";
 import { useJob } from "@/hooks/useJob";
 
 type Props = {
@@ -15,11 +15,19 @@ type Props = {
   onSaved: (s: Shot) => void;
   onRegenerated: () => void;
   onOpen: (n: number) => void;
+  face?: FaceCheck;
+};
+
+const FACE_LABEL: Record<FaceStatus, string> = {
+  ok: "얼굴 일치",
+  "drift?": "얼굴 확인 필요",
+  small: "얼굴 작아 판정 불가",
+  "no face": "얼굴 안 보임",
 };
 
 const splitHighlight = (s: string) => s.split(",").map((x) => x.trim()).filter(Boolean);
 
-export function ShotCard({ pid, shot, speakers, cameras, price, canGenerate, blockedReason, onSaved, onRegenerated, onOpen }: Props) {
+export function ShotCard({ pid, shot, speakers, cameras, price, canGenerate, blockedReason, onSaved, onRegenerated, onOpen, face }: Props) {
   const [text, setText] = useState(shot.text);
   const [who, setWho] = useState(shot.who);
   const [camera, setCamera] = useState(shot.camera);
@@ -102,6 +110,14 @@ export function ShotCard({ pid, shot, speakers, cameras, price, canGenerate, blo
           <div className="thumb empty">이미지 없음</div>
         )}
         <span className="badge">컷 {shot.n}</span>
+        {face && (
+          <span
+            className={`badge face ${face.status === "ok" ? "ok" : "warn"}`}
+            title={face.faces.map((f) => `${f.closest} ${f.similarity.toFixed(2)}${f.small ? " (작음)" : ""}`).join(" / ") || "감지된 얼굴 없음"}
+          >
+            {FACE_LABEL[face.status]}
+          </span>
+        )}
         {busy && (
           <div className="overlay" role="status">
             <div className="spinner" />

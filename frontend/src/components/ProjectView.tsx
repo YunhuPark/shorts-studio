@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { use, useCallback, useEffect, useState } from "react";
-import { api, ApiError, imageUrl, Project, Settings, Shot } from "@/lib/api";
+import { api, ApiError, describe, FaceCheck, imageUrl, Project, Settings, Shot } from "@/lib/api";
 import { RenderPanel } from "@/components/RenderPanel";
 import { ShotCard } from "@/components/ShotCard";
 import { VoicePanel } from "@/components/VoicePanel";
@@ -13,6 +13,9 @@ export function ProjectView({ params }: { params: Promise<{ id: string }> }) {
   const [settings, setSettings] = useState<Settings | null>(null);
   const [error, setError] = useState("");
   const [open, setOpen] = useState<number | null>(null);
+  const [faceBusy, setFaceBusy] = useState(false);
+  const [faceError, setFaceError] = useState("");
+  const [faceRun, setFaceRun] = useState<{ byShot: Map<number, FaceCheck>; versions: Map<number, number | null> } | null>(null);
 
   const load = useCallback(async () => {
     try {
@@ -41,6 +44,21 @@ export function ProjectView({ params }: { params: Promise<{ id: string }> }) {
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [open]);
+
+  async function runFaceCheck() {
+    if (!project || faceBusy) return;
+    setFaceBusy(true);
+    setFaceError("");
+    try {
+      const result = await api.faceCheck(id);
+      // remember which image each result belongs to, so a regenerated shot does not keep a stale badge
+      setFaceRun({ byShot: new Map(result.checks.map((c) => [c.shot, c])), versions: new Map(project.shots.map((s) => [s.n, s.image_version])) });
+    } catch (e) {
+      setFaceError(e instanceof ApiError ? describe(e.detail) : "얼굴 검사를 실행하지 못했습니다");
+    } finally {
+      setFaceBusy(false);
+    }
+  }
 
   const replaceShot = (s: Shot) =>
     setProject((p) => (p ? { ...p, shots: p.shots.map((x) => (x.n === s.n ? s : x)) } : p));
@@ -111,6 +129,15 @@ export function ProjectView({ params }: { params: Promise<{ id: string }> }) {
         대사를 고치고 “저장”을 누르면 바로 파일에 반영됩니다(이전 버전은 .bak로 보관). 이미지 재생성은 유료 API를 쓰므로
         예상 비용을 확인한 뒤에만 실행됩니다.
       </p>
+      <div className="row" style={{ alignItems: "center", gap: 12, marginBottom: 12 }}>
+        <button onClick={runFaceCheck} disabled={faceBusy} title="내 컴퓨터에서만 계산합니다. 비용 없음.">
+          {faceBusy ? "검사 중…" : "얼굴 일치 검사"}
+        </button>
+        <span className="muted small">
+          등장인물 기준 이미지와 각 컷의 얼굴을 비교합니다(무료·로컬). 옆모습·뒷모습은 낮게 나올 수 있어 눈으로 확인할 컷을 고르는 용도입니다.
+        </span>
+      </div>
+      {faceError && <p className="error" role="alert">{faceError}</p>}
       <div className="grid">
         {project.shots.map((s) => (
           <ShotCard
@@ -125,6 +152,7 @@ export function ProjectView({ params }: { params: Promise<{ id: string }> }) {
             onSaved={replaceShot}
             onRegenerated={load}
             onOpen={setOpen}
+            face={faceRun && faceRun.versions.get(s.n) === s.image_version ? faceRun.byShot.get(s.n) : undefined}
           />
         ))}
       </div>

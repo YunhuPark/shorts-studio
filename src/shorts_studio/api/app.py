@@ -27,6 +27,8 @@ from ..qa import lint
 from ..render import RenderOptions
 from ..render import render as render_storyboard
 from ..render.subtitles import split_phrases
+from ..vision.faces import SAME_PERSON_COSINE, check_shots
+from ..vision.fetch import ModelError
 from .jobs import JobManager
 from .spend import SpendLedger
 from .store import NotFound, ProjectStore
@@ -71,6 +73,13 @@ class Deps:
     image_provider: Callable = field(default=lambda model: GeminiImageProvider(model))
     voice_provider: Callable = field(default=lambda cache: AzureVoiceProvider(cache))
     render_fn: Callable = field(default=render_storyboard)
+    embedder: Callable = field(default=lambda: _opencv_embedder())
+
+
+def _opencv_embedder():
+    """Needs the optional `vision` extra and the models from `fetch-models`."""
+    from ..vision.faces import OpenCVEmbedder
+    return OpenCVEmbedder()
 
 
 class ShotPatch(BaseModel):
@@ -107,6 +116,7 @@ def create_app(settings: Settings | None = None, deps: Deps | None = None) -> Fa
     jobs = JobManager()
     ledger = SpendLedger(settings.root / "spend.jsonl")
     spend_lock = threading.Lock()
+    face_lock = threading.Lock()  # one face check at a time: it is CPU heavy
     tts_cache = settings.root / "cache" / "tts"
     app = FastAPI(title="shorts-studio local dashboard")
     app.add_middleware(TrustedHostMiddleware, allowed_hosts=list(settings.allowed_hosts))
@@ -291,6 +301,27 @@ def create_app(settings: Settings | None = None, deps: Deps | None = None) -> Fa
             if jobs.active(pid, "render"):
                 raise HTTPException(409, "a render is already running for this project")
             return jobs.submit("render", pid, work).public()
+
+    @app.post("/api/projects/{pid}/face-check")
+    def face_check(pid: str) -> dict:
+        """Free, local: compares the faces in each shot with the project's character reference images."""
+        sb = store.load(pid)
+        images_dir = store.images_dir(pid)
+        refs = {c: images_dir / f for c, f in store.settings(pid)["char_refs"].items() if (images_dir / f).exists()}
+        if not refs:
+            raise HTTPException(422, "no character reference images are set for this project")
+        with face_lock:
+            try:
+                embedder = deps.embedder()
+                checks = check_shots(sb, DirectoryImageSource(images_dir), refs, embedder)
+            except (ImportError, ModelError) as e:
+                raise HTTPException(503, f"face check is not available: {e}") from e
+            except ValueError as e:
+                raise HTTPException(422, str(e)) from e
+        return {"threshold": SAME_PERSON_COSINE, "checks": [
+            {"shot": c.shot, "status": c.status, "expected": c.expected,
+             "faces": [{"character": f.character, "closest": f.closest, "similarity": round(f.similarity, 3),
+                        "small": f.small} for f in c.faces]} for c in checks]}
 
     @app.get("/api/jobs/{job_id}")
     def get_job(job_id: str) -> dict:

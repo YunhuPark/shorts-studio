@@ -106,3 +106,11 @@ test("the image viewer opens on click and closes with Escape", async ({ page }) 
   await page.keyboard.press("Escape");
   await expect(viewer).toBeHidden();
 });
+
+test("face check badges only the shots that feature a reference character", async ({ page }) => {
+  await openDemo(page);
+  await expect(page.getByText("얼굴 일치", { exact: true })).toHaveCount(0);
+  await page.getByRole("button", { name: "얼굴 일치 검사" }).click();
+  await expect(card(page, 2).getByText("얼굴 일치", { exact: true })).toBeVisible();
+  await expect(page.getByText("얼굴 일치", { exact: true })).toHaveCount(1); // shots 1, 3, 4 have no reference character
+});

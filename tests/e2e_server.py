@@ -99,10 +99,17 @@ def main() -> None:
                 log(f"shot{shot.n:02d} rendered")
         Path(out).write_bytes(fixture.read_bytes())
 
+    class FakeEmbedder:
+        def embed_all(self, path):  # every image shows one face that looks like the reference
+            import numpy as np
+
+            from shorts_studio.vision.faces import Face
+            return [Face(np.array([1.0, 0.0]), 0.99, (0, 0, 100, 200))]
+
     settings = Settings(root / "data", image_price_usd=0.05, daily_cap_usd=1.0)
     print(f"e2e API on http://127.0.0.1:{port} (data {root})", flush=True)
-    uvicorn.run(create_app(settings, Deps(FakeImages(), FakeVoice(), fake_render)), host="127.0.0.1", port=port,
-                log_level="warning")
+    app = create_app(settings, Deps(FakeImages(), FakeVoice(), fake_render, FakeEmbedder))
+    uvicorn.run(app, host="127.0.0.1", port=port, log_level="warning")
 
 
 if __name__ == "__main__":

@@ -49,6 +49,15 @@ export type Job = {
   error: string | null;
 };
 
+export type FaceStatus = "ok" | "drift?" | "small" | "no face";
+export type FaceCheck = {
+  shot: number;
+  status: FaceStatus;
+  expected: string[];
+  faces: { character: string | null; closest: string; similarity: number; small: boolean }[];
+};
+export type FaceCheckResult = { threshold: number; checks: FaceCheck[] };
+
 export type RenderFile = { name: string; bytes: number; created: number };
 export type VoiceChoice = { name: string; gender: string; note: string };
 
@@ -102,6 +111,7 @@ export const api = {
   regenerate: (id: string, n: number) =>
     req<Job & { estimated_usd: number }>(`/api/projects/${id}/shots/${n}/regenerate`, body({ confirm: true })),
   render: (id: string, only?: number[]) => req<Job>(`/api/projects/${id}/render`, body({ only: only ?? null })),
+  faceCheck: (id: string) => req<FaceCheckResult>(`/api/projects/${id}/face-check`, { method: "POST", body: "{}" }),
   job: (jobId: string) => req<Job>(`/api/jobs/${jobId}`),
   renders: (id: string) => req<RenderFile[]>(`/api/projects/${id}/renders`),
 };
