@@ -28,6 +28,7 @@ from ..render.bgm import STYLES as BGM_STYLES
 from ..render.subtitles import split_phrases
 from ..vision.faces import SAME_PERSON_COSINE, check_shots
 from ..vision.fetch import ModelError
+from . import voices as voices_catalog
 from .auth import AuthConfig, make_owner_resolver
 from .handlers import JobContext, handle, refund_orphan
 from .jobqueue import JobQueue
@@ -39,19 +40,7 @@ VOICE_RE = re.compile(r"^[a-z]{2}-[A-Z]{2}-[A-Za-z]+Neural$")
 RATE_RE = re.compile(r"^[+-]?\d{1,3}%$")
 RENDER_RE = re.compile(r"^render-\d{8}-\d{6}\.mp4$")
 SAMPLE_TEXT = "오늘이 우리 결혼기념일이라서. 집사람 몫이야."
-VOICES = [
-    {"name": "ko-KR-InJoonNeural", "gender": "male", "note": "젊은 남성 (내레이터용)"},
-    {"name": "ko-KR-BongJinNeural", "gender": "male", "note": ""},
-    {"name": "ko-KR-GookMinNeural", "gender": "male", "note": ""},
-    {"name": "ko-KR-HyunsuNeural", "gender": "male", "note": ""},
-    {"name": "ko-KR-HyunsuMultilingualNeural", "gender": "male", "note": ""},
-    {"name": "ko-KR-SunHiNeural", "gender": "female", "note": ""},
-    {"name": "ko-KR-JiMinNeural", "gender": "female", "note": ""},
-    {"name": "ko-KR-SeoHyeonNeural", "gender": "female", "note": ""},
-    {"name": "ko-KR-SoonBokNeural", "gender": "female", "note": ""},
-    {"name": "ko-KR-YuJinNeural", "gender": "female", "note": ""},
-]
-VOICE_NAMES = {v["name"] for v in VOICES}
+VOICE_NAMES = voices_catalog.NAMES
 
 
 @dataclass
@@ -264,7 +253,15 @@ def create_app(settings: Settings | None = None, deps: Deps | None = None) -> Fa
 
     @app.get("/api/voices")
     def list_voices(owner: str = Depends(get_owner)) -> list[dict]:
-        return VOICES
+        return [{"name": v.name, "gender": v.gender, "note": v.note, "pitch_hz": v.pitch_hz}
+                for v in voices_catalog.VOICES]
+
+    @app.get("/api/voices/recommend")
+    def recommend_voices(gender: str, age: str, owner: str = Depends(get_owner)) -> dict:
+        try:
+            return voices_catalog.recommend(gender, age)
+        except ValueError as e:
+            raise HTTPException(422, str(e)) from e
 
     @app.get("/api/voices/sample")
     def voice_sample(voice: str, rate: str = "-10%", text: str = SAMPLE_TEXT, owner: str = Depends(get_owner)):

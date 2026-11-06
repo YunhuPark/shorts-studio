@@ -139,3 +139,41 @@ test("the AI-generated label is on by default, and switching it off is sent to t
   expect((await request).postDataJSON()).toMatchObject({ ai_label: false });
   await expect(panel.locator("video")).toHaveAttribute("src", /render-/);
 });
+
+const speaker = (page: Page, who: string) => page.locator(".speaker").filter({ has: page.locator("strong", { hasText: who }) });
+
+test("voice recommendation orders candidates by the requested age and fills voice, speed and pitch without saving", async ({ page }) => {
+  await openDemo(page);
+  const row = speaker(page, "grandpa");
+  await row.getByRole("button", { name: "grandpa 목소리 추천 받기" }).click();   // defaults: 남 / 노년
+  const picks = row.getByLabel("grandpa 추천 목소리").getByRole("button");
+  await expect(picks).toHaveText(["BongJin · 130Hz", "HyunsuMultilingual · 135Hz", "Hyunsu · 135Hz"]);
+  await expect(row.getByText(/근사치/)).toBeVisible();   // it admits that old voices are approximated
+  await picks.nth(0).click();
+  await expect(row.getByLabel("속도")).toHaveValue("-15%");
+  await expect(row.getByRole("button", { name: "저장", exact: true })).toBeEnabled();   // not saved until the user saves
+
+  await row.getByLabel("grandpa 성별").selectOption("female");
+  await row.getByLabel("grandpa 나이대").selectOption("young");
+  await expect(row.getByLabel("grandpa 추천 목소리")).toBeHidden();   // changing the profile clears stale picks
+  await row.getByRole("button", { name: "grandpa 목소리 추천 받기" }).click();
+  await expect(row.getByLabel("grandpa 추천 목소리").getByRole("button").first()).toHaveText("SeoHyeon · 247Hz");
+});
+
+test("narration mode switches every other character to the narrator's voice after confirmation", async ({ page }) => {
+  await openDemo(page);
+  const group = page.getByRole("group", { name: "내레이션 모드" });
+  await group.getByRole("button", { name: "내레이션으로 통일" }).click();
+  await expect(group).toContainText("grandpa");
+  await group.getByRole("button", { name: "취소" }).click();
+  await expect(group.getByRole("button", { name: "내레이션으로 통일" })).toBeVisible();   // cancelling changes nothing
+
+  await group.getByRole("button", { name: "내레이션으로 통일" }).click();
+  await group.getByRole("button", { name: "바꾸기" }).click();
+  await expect(group.getByRole("status")).toContainText("내레이터 목소리로 바뀌었습니다");
+  await page.reload();
+  const row = speaker(page, "grandpa");
+  await expect(row.locator("select").first()).toHaveValue("ko-KR-InJoonNeural"); // the voice picker comes first in the row
+  await expect(row.getByLabel("속도")).toHaveValue("+22%");
+});
+

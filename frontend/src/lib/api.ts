@@ -60,7 +60,13 @@ export type FaceCheckResult = { threshold: number; checks: FaceCheck[] };
 
 export type RenderFile = { name: string; bytes: number; created: number };
 export type BgmStyle = { name: string; label: string };
-export type VoiceChoice = { name: string; gender: string; note: string };
+export type VoiceChoice = { name: string; gender: string; note: string; pitch_hz?: number };
+export type Recommendation = {
+  note: string;
+  rate: string;
+  pitch: string;
+  voices: { name: string; gender: string; pitch_hz: number }[];
+};
 
 export class ApiError extends Error {
   constructor(public status: number, public detail: unknown) {
@@ -109,6 +115,8 @@ export const api = {
     req<VoiceSpec>(`/api/projects/${id}/voices/${who}`, { method: "PUT", body: JSON.stringify(v) }),
   preview: (text: string) => req<{ phrases: string[] }>("/api/subtitles/preview", body({ text })),
   voices: () => req<VoiceChoice[]>("/api/voices"),
+  recommendVoices: (gender: string, age: string) =>
+    req<Recommendation>(`/api/voices/recommend?gender=${gender}&age=${age}`),
   regenerate: (id: string, n: number) =>
     req<Job & { estimated_usd: number }>(`/api/projects/${id}/shots/${n}/regenerate`, body({ confirm: true })),
   bgmStyles: () => req<BgmStyle[]>("/api/bgm-styles"),
