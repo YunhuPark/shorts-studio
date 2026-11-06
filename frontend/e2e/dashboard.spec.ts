@@ -124,6 +124,18 @@ test("the background music is chosen before rendering and the choice is sent to 
   await select.selectOption("warm_major");
   const request = page.waitForRequest((r) => r.url().endsWith("/api/projects/demo/render") && r.method() === "POST");
   await panel.getByRole("button", { name: "영상 렌더 시작" }).click();
-  expect((await request).postDataJSON()).toMatchObject({ bgm_style: "warm_major" });
+  expect((await request).postDataJSON()).toMatchObject({ bgm_style: "warm_major", ai_label: true });
+  await expect(panel.locator("video")).toHaveAttribute("src", /render-/);
+});
+
+test("the AI-generated label is on by default, and switching it off is sent to the API", async ({ page }) => {
+  await openDemo(page);
+  const panel = page.locator("#render");
+  const box = panel.getByLabel("영상에 “AI 생성” 표시 넣기 (권장)");
+  await expect(box).toBeChecked();
+  await box.uncheck();
+  const request = page.waitForRequest((r) => r.url().endsWith("/api/projects/demo/render") && r.method() === "POST");
+  await panel.getByRole("button", { name: "영상 렌더 시작" }).click();
+  expect((await request).postDataJSON()).toMatchObject({ ai_label: false });
   await expect(panel.locator("video")).toHaveAttribute("src", /render-/);
 });

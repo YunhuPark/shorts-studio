@@ -112,8 +112,11 @@ export const api = {
   regenerate: (id: string, n: number) =>
     req<Job & { estimated_usd: number }>(`/api/projects/${id}/shots/${n}/regenerate`, body({ confirm: true })),
   bgmStyles: () => req<BgmStyle[]>("/api/bgm-styles"),
-  render: (id: string, only?: number[], bgmStyle?: string) =>
-    req<Job>(`/api/projects/${id}/render`, body({ only: only ?? null, ...(bgmStyle ? { bgm_style: bgmStyle } : {}) })),
+  render: (id: string, only?: number[], bgmStyle?: string, aiLabel?: boolean) =>
+    req<Job>(
+      `/api/projects/${id}/render`,
+      body({ only: only ?? null, ...(bgmStyle ? { bgm_style: bgmStyle } : {}), ...(aiLabel === undefined ? {} : { ai_label: aiLabel }) }),
+    ),
   faceCheck: (id: string) => req<FaceCheckResult>(`/api/projects/${id}/face-check`, { method: "POST", body: "{}" }),
   job: (jobId: string) => req<Job>(`/api/jobs/${jobId}`),
   renders: (id: string) => req<RenderFile[]>(`/api/projects/${id}/renders`),

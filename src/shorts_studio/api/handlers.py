@@ -73,7 +73,8 @@ def render(ctx: JobContext, job: Job, report) -> str:
             done += 1
         report(line, min(done / total, 0.95))
 
-    opts = RenderOptions(work_dir=store.work_dir(job.project), bgm_style=job.params.get("bgm_style", "night_piano"))
+    opts = RenderOptions(work_dir=store.work_dir(job.project), bgm_style=job.params.get("bgm_style", "night_piano"),
+                         ai_label=bool(job.params.get("ai_label", False)))
     ctx.render_fn(sb, DirectoryImageSource(store.images_dir(job.project)), ctx.voice_provider(ctx.tts_cache),
                   out, opts, only, log)
     return out.name

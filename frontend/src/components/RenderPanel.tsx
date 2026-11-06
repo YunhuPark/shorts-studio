@@ -13,6 +13,7 @@ export function RenderPanel({ pid, azureReady }: { pid: string; azureReady: bool
   const [error, setError] = useState("");
   const [styles, setStyles] = useState<BgmStyle[]>([]);
   const [style, setStyle] = useState("night_piano");
+  const [aiLabel, setAiLabel] = useState(true);
 
   const refresh = useCallback(() => {
     api.renders(pid).then(setRenders).catch(() => {});
@@ -31,7 +32,7 @@ export function RenderPanel({ pid, azureReady }: { pid: string; azureReady: bool
   async function start() {
     setError("");
     try {
-      const j = await api.render(pid, undefined, style);
+      const j = await api.render(pid, undefined, style, aiLabel);
       setJobId(j.id);
     } catch (e) {
       setError(e instanceof ApiError ? describe(e.detail) : "렌더를 시작하지 못했습니다");
@@ -54,6 +55,13 @@ export function RenderPanel({ pid, azureReady }: { pid: string; azureReady: bool
           {styles.map((s) => <option key={s.name} value={s.name}>{s.label}</option>)}
         </select>
       </label>
+      <label className="check">
+        <input type="checkbox" checked={aiLabel} onChange={(e) => setAiLabel(e.target.checked)} disabled={running} />
+        <span>영상에 “AI 생성” 표시 넣기 (권장)</span>
+      </label>
+      <p className="muted small">
+        왼쪽 위에 작은 표식을 넣고 파일 정보에도 AI 생성 사실을 적습니다. 어떤 표시가 법적으로 필요한지는 직접 확인해야 합니다.
+      </p>
       <div className="actions">
         <button className="primary" onClick={start} disabled={running || !azureReady} title={azureReady ? "" : "Azure 키가 필요합니다"}>
           {running ? "렌더 중…" : "영상 렌더 시작"}

@@ -14,6 +14,7 @@ from ..providers.base import ImageSource, VoiceProvider
 from . import bgm
 from .camera import camera, crop_box
 from .fonts import resolve_font
+from .label import DEFAULT_TEXT, final_encode_args, make_label_png
 from .mix import build_audio, run_ffmpeg
 from .proc import popen
 from .subtitles import render_phrase, split_phrases
@@ -33,6 +34,8 @@ class RenderOptions:
     ffmpeg: str | None = None
     work_dir: Path = Path(".cache/work")
     bgm_style: str = bgm.DEFAULT_STYLE
+    ai_label: bool = False        # visible "AI generated" badge + mp4 metadata (off here to keep output identical)
+    ai_label_text: str = DEFAULT_TEXT
 
 
 @dataclass
@@ -167,8 +170,7 @@ def render(sb: Storyboard, images: ImageSource, voices: VoiceProvider, out_path:
         bgm.compose(t, score, opts.bgm_style)
     mixed = work / "audio.wav"
     build_audio(opts.ffmpeg, audio_items, t, chime_at, score, mixed)
-    run_ffmpeg([opts.ffmpeg, "-y", "-i", str(video), "-i", str(mixed), "-c:v", "libx264", "-crf", "22",
-                "-preset", "medium", "-maxrate", "10M", "-bufsize", "20M", "-pix_fmt", "yuv420p",
-                "-c:a", "aac", "-b:a", "192k", "-shortest", str(out_path)])
+    label = make_label_png(opts.ai_label_text, font, work / "ai_label.png") if opts.ai_label else None
+    run_ffmpeg(final_encode_args(opts.ffmpeg, video, mixed, out_path, label))
     log(f"done: {out_path}  ({t:.1f}s, {len(plans)} shots)")
     return RenderResult(out_path, t, plans, skipped)

@@ -120,6 +120,7 @@ class RegenBody(BaseModel):
 class RenderBody(BaseModel):
     only: list[int] | None = None
     bgm_style: str = DEFAULT_BGM_STYLE
+    ai_label: bool = True   # the dashboard discloses AI generation unless the user switches it off
 
 
 def create_app(settings: Settings | None = None, deps: Deps | None = None) -> FastAPI:
@@ -310,7 +311,8 @@ def create_app(settings: Settings | None = None, deps: Deps | None = None) -> Fa
         if total == 0:
             raise HTTPException(422, "no shot has an image to render")
         job = jobs.submit_unique("render", pid, store.owner,
-                                 {"only": sorted(only) if only else None, "bgm_style": body.bgm_style})
+                                 {"only": sorted(only) if only else None, "bgm_style": body.bgm_style,
+                                  "ai_label": body.ai_label})
         if job is None:
             raise HTTPException(409, "a render is already running for this project")
         return job.public()

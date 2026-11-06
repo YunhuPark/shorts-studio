@@ -32,7 +32,7 @@ def cmd_render(a: argparse.Namespace) -> int:
     if errors:
         print("\n".join(map(str, errors)), file=sys.stderr)
         return 2
-    opts = RenderOptions(work_dir=Path(a.work), font=a.font, bgm_style=a.bgm_style)
+    opts = RenderOptions(work_dir=Path(a.work), font=a.font, bgm_style=a.bgm_style, ai_label=a.ai_label)
     voices = AzureVoiceProvider(cache_dir=a.tts_cache or Path(a.work) / "tts")
     render(sb, DirectoryImageSource(a.images), voices, a.out, opts, parse_only(a.only))
     return 0
@@ -272,6 +272,7 @@ def main(argv: list[str] | None = None) -> int:
     r.add_argument("--speaker-voice", action="append", metavar="WHO=VOICE", help="override a speaker's voice")
     r.add_argument("--speaker-rate", help="rate for overridden voices, e.g. -10%%")
     r.add_argument("--bgm-style", default="night_piano", choices=sorted(BGM_STYLES), help="background score")
+    r.add_argument("--ai-label", action="store_true", help="burn in an \"AI generated\" badge and write mp4 metadata")
     r.set_defaults(fn=cmd_render)
 
     b = sub.add_parser("bgm-sample", help="write the background score alone, to audition a style")

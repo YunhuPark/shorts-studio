@@ -471,9 +471,11 @@ class BgmStyle(ApiTest):
     def setUp(self):
         super().setUp()
         self.styles_seen = []
+        self.labels_seen = []
 
         def render(sb_, images, voices, out, opts, only, log):
             self.styles_seen.append(opts.bgm_style)
+            self.labels_seen.append(opts.ai_label)
             Path(out).write_bytes(b"\x00\x00\x00\x18ftypmp42" + b"0" * 64)
 
         self.use_app(Deps(self.images, FakeVoice(), render))
@@ -489,6 +491,11 @@ class BgmStyle(ApiTest):
         job = self.client.post("/api/projects/demo/render", json={}).json()
         self.wait_job(job["id"])
         self.assertEqual(self.styles_seen, ["tense_low", "night_piano"])
+
+    def test_the_ai_label_is_on_by_default_and_can_be_switched_off(self):
+        self.wait_job(self.client.post("/api/projects/demo/render", json={}).json()["id"])
+        self.wait_job(self.client.post("/api/projects/demo/render", json={"ai_label": False}).json()["id"])
+        self.assertEqual(self.labels_seen, [True, False])
 
     def test_unknown_style_is_rejected_before_anything_runs(self):
         r = self.client.post("/api/projects/demo/render", json={"bgm_style": "jazz"})
