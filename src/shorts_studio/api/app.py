@@ -31,7 +31,7 @@ from ..vision.fetch import ModelError
 from .auth import AuthConfig, make_owner_resolver
 from .handlers import JobContext, handle, refund_orphan
 from .jobqueue import JobQueue
-from .spend import SpendLedger
+from .ledger import CreditLedger
 from .store import LOCAL_OWNER, OWNER, NotFound, ProjectStore
 from .worker import start_threads
 
@@ -58,7 +58,8 @@ VOICE_NAMES = {v["name"] for v in VOICES}
 class Settings:
     root: Path
     image_price_usd: float = 0.067   # estimate per generated image; check the provider's current price
-    daily_cap_usd: float = 2.0
+    daily_cap_usd: float = 2.0       # per user
+    monthly_cap_usd: float = 0.0     # all users together; 0 = no monthly budget
     # Only answer requests addressed to localhost: blocks DNS-rebinding pages from driving paid actions.
     allowed_hosts: tuple[str, ...] = ("localhost", "127.0.0.1", "[::1]")
     auth: AuthConfig | None = None   # None: one fixed local user (safe only on localhost); else verify login tokens
@@ -71,6 +72,7 @@ class Settings:
         return cls(Path(os.environ.get("SHORTS_DATA", ".data")),
                    float(os.environ.get("SHORTS_IMAGE_PRICE_USD", "0.067")),
                    float(os.environ.get("SHORTS_DAILY_CAP_USD", "2.0")),
+                   float(os.environ.get("SHORTS_MONTHLY_CAP_USD", "0")),
                    auth=AuthConfig.from_env(), **extra)
 
 
@@ -126,8 +128,8 @@ def create_app(settings: Settings | None = None, deps: Deps | None = None) -> Fa
     stores: dict[str, ProjectStore] = {}
     resolve_owner = make_owner_resolver(settings.auth) if settings.auth else deps.owner
     jobs = JobQueue(settings.root / "jobs.sqlite3")
-    ledger = SpendLedger(settings.root / "spend.jsonl")
-    spend_lock = threading.Lock()
+    ledger = CreditLedger(settings.root / "ledger.sqlite3", legacy_jsonl=settings.root / "spend.jsonl")
+    stores_lock = threading.Lock()
     face_lock = threading.Lock()  # one face check at a time: it is CPU heavy
     tts_cache = settings.root / "cache" / "tts"
     app = FastAPI(title="shorts-studio local dashboard")
@@ -156,7 +158,7 @@ def create_app(settings: Settings | None = None, deps: Deps | None = None) -> Fa
         return owner
 
     def get_store(owner: str = Depends(get_owner)) -> ProjectStore:
-        with spend_lock:
+        with stores_lock:
             if owner not in stores:
                 stores[owner] = ProjectStore(settings.root, owner)
             return stores[owner]
@@ -185,7 +187,7 @@ def create_app(settings: Settings | None = None, deps: Deps | None = None) -> Fa
     @app.get("/api/settings")
     def get_settings(owner: str = Depends(get_owner)) -> dict:
         return {"image_price_usd": settings.image_price_usd, "daily_cap_usd": settings.daily_cap_usd,
-                "spent_today_usd": ledger.today_total(),
+                "spent_today_usd": ledger.today_total(owner),
                 "keys": {"azure": bool(os.environ.get("AZURE_SPEECH_KEY") and os.environ.get("AZURE_SPEECH_REGION")),
                          "gemini": bool(os.environ.get("GEMINI_API_KEY"))}}
 
@@ -284,18 +286,18 @@ def create_app(settings: Settings | None = None, deps: Deps | None = None) -> Fa
         if not body.confirm:
             raise HTTPException(400, {"message": "confirm required", "estimated_usd": est})
         kind = f"regenerate-{n}"
-        with spend_lock:  # check, reserve and enqueue atomically so quick repeated clicks cannot overshoot the cap
-            if jobs.active(pid, kind, store.owner):
-                raise HTTPException(409, f"shot {n} is already being regenerated")
-            spent = ledger.today_total()
-            if spent + est > settings.daily_cap_usd:
-                raise HTTPException(429, {"message": "daily spend cap reached", "spent_today_usd": spent,
-                                          "daily_cap_usd": settings.daily_cap_usd})
-            ledger.record(pid, n, est, "reserve")
-            job = jobs.submit_unique(kind, pid, store.owner, {"n": n, "est": est})
-            if job is None:  # another process queued the same shot first
-                ledger.record(pid, n, -est, "refund")
-                raise HTTPException(409, f"shot {n} is already being regenerated")
+        if jobs.active(pid, kind, store.owner):
+            raise HTTPException(409, f"shot {n} is already being regenerated")
+        res = ledger.reserve(store.owner, pid, n, est, settings.daily_cap_usd, settings.monthly_cap_usd)
+        if res.id is None:
+            if res.reason == "monthly":
+                raise HTTPException(429, {"message": "monthly budget reached; new paid work is paused"})
+            raise HTTPException(429, {"message": "daily spend cap reached", "spent_today_usd": res.spent_today_usd,
+                                      "daily_cap_usd": settings.daily_cap_usd})
+        job = jobs.submit_unique(kind, pid, store.owner, {"n": n, "est": est, "reservation": res.id})
+        if job is None:  # the same shot was queued in between (another tab or process): give the money back
+            ledger.refund(res.id)
+            raise HTTPException(409, f"shot {n} is already being regenerated")
         return job.public() | {"estimated_usd": est}
 
     @app.post("/api/projects/{pid}/render", status_code=202)

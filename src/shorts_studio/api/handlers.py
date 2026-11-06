@@ -14,14 +14,14 @@ from ..generate import plan_generation, run_generation
 from ..providers import DirectoryImageSource
 from ..render import RenderOptions
 from .jobqueue import Job
-from .spend import SpendLedger
+from .ledger import CreditLedger
 from .store import ProjectStore
 
 
 @dataclass
 class JobContext:
     root: Path
-    ledger: SpendLedger
+    ledger: CreditLedger
     image_provider: Callable   # model -> provider with generate(prompt, refs, out_path)
     voice_provider: Callable   # cache dir -> provider with synthesize(text, spec)
     render_fn: Callable
@@ -40,7 +40,7 @@ def handle(ctx: JobContext, job: Job, report) -> str | None:
 
 
 def regenerate(ctx: JobContext, job: Job, report) -> str:
-    n, est = int(job.params["n"]), float(job.params["est"])
+    n = int(job.params["n"])
     try:
         store = ProjectStore(ctx.root, job.owner)
         sb = store.load(job.project)
@@ -54,7 +54,7 @@ def regenerate(ctx: JobContext, job: Job, report) -> str:
         report(f"generating shot {n} with {model}", 0.05)
         run_generation(items, ctx.image_provider(model), images_dir, model, log=lambda line: report(line, 0.9))
     except Exception:
-        ctx.ledger.record(job.project, n, -est, "refund")  # nothing was produced, give the reservation back
+        ctx.ledger.refund(job.params.get("reservation"))  # nothing was produced, give the reservation back
         raise
     return f"cut{n:02d}.png"
 
@@ -82,4 +82,4 @@ def render(ctx: JobContext, job: Job, report) -> str:
 def refund_orphan(ctx: JobContext, job: Job) -> None:
     """A worker died while generating: the reserved spend was never used."""
     if job.kind.startswith("regenerate-"):
-        ctx.ledger.record(job.project, int(job.params["n"]), -float(job.params["est"]), "refund")
+        ctx.ledger.refund(job.params.get("reservation"))   # idempotent: never refunded twice

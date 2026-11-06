@@ -513,31 +513,31 @@ class DurableJobs(ApiTest):
         import contextlib
         import sqlite3
 
-        from shorts_studio.api.spend import SpendLedger
-        ledger = SpendLedger(self.settings.root / "spend.jsonl")
+        from shorts_studio.api.ledger import CreditLedger
+        ledger = CreditLedger(self.settings.root / "ledger.sqlite3")
         for stop in self._stops:                                        # the running app would claim the job itself
             stop()
         self._stops.clear()
-        ledger.record("demo", 1, 0.05, "reserve")                       # the crashed API had reserved the spend
-        job = self.queue().submit("regenerate-1", "demo", "local", {"n": 1, "est": 0.05})
+        res = ledger.reserve("local", "demo", 1, 0.05, daily_cap_usd=1.0)   # the crashed API had reserved the spend
+        job = self.queue().submit("regenerate-1", "demo", "local", {"n": 1, "est": 0.05, "reservation": res.id})
         self.queue().claim("crashed-worker")
         with contextlib.closing(sqlite3.connect(self.settings.root / "jobs.sqlite3")) as c, c:
             c.execute("UPDATE jobs SET heartbeat=? WHERE id=?", (time.time() - 600, job.id))
-        self.assertEqual(ledger.today_total(), 0.05)
+        self.assertEqual(ledger.today_total("local"), 0.05)
 
         self.use_app(Deps(self.images, FakeVoice(), lambda *a, **k: None))   # restart: workers recover stale jobs
         got = self.wait_job(job.id)
         self.assertEqual(got["state"], "failed")
-        self.assertEqual(ledger.today_total(), 0.0)                          # reservation given back exactly once
+        self.assertEqual(ledger.today_total("local"), 0.0)                   # reservation given back exactly once
         self.assertEqual(self.client.get("/api/settings").json()["spent_today_usd"], 0.0)
         time.sleep(0.5)
-        self.assertEqual(ledger.today_total(), 0.0)                          # and not refunded again by later passes
+        self.assertEqual(ledger.today_total("local"), 0.0)                   # and not refunded again by later passes
 
     def test_api_without_workers_queues_and_a_separate_worker_runs_the_job(self):
         from dataclasses import replace
 
         from shorts_studio.api.handlers import JobContext, handle
-        from shorts_studio.api.spend import SpendLedger
+        from shorts_studio.api.ledger import CreditLedger
         from shorts_studio.api.worker import Worker
 
         rendered = []
@@ -552,12 +552,79 @@ class DurableJobs(ApiTest):
         time.sleep(0.6)
         self.assertEqual(self.client.get(f"/api/jobs/{queued['id']}").json()["state"], "queued")  # nobody runs it
 
-        ctx = JobContext(settings.root, SpendLedger(settings.root / "spend.jsonl"), self.images, FakeVoice(), render)
+        ledger = CreditLedger(settings.root / "ledger.sqlite3")
+        ctx = JobContext(settings.root, ledger, self.images, FakeVoice(), render)
         Worker(self.queue(), lambda job, report: handle(ctx, job, report), name="other-process").run_one()
         job = self.client.get(f"/api/jobs/{queued['id']}").json()
         self.assertEqual(job["state"], "done", job)
         self.assertEqual(rendered, ["warm_major"])
         self.assertEqual(self.client.get("/api/projects/demo/renders").json()[0]["name"], job["result"])
+
+
+class UserLimits(ApiTest):
+    """Spend caps are per user, and an optional monthly budget is shared by everyone."""
+
+    def setUp(self):
+        super().setUp()
+        root = Path(self.tmp.name)
+        for who in ("alice", "bob"):
+            ProjectStore(root / "data", who).create("demo", root / "sb.json", root / "imgs")
+        self.deps = Deps(self.images, FakeVoice(), lambda *a, **k: None,
+                         owner=lambda request: request.headers.get("x-user", ""))
+        self.use_app(self.deps)
+
+    def regen(self, who, n):
+        r = self.client.post(f"/api/projects/demo/shots/{n}/regenerate", json={"confirm": True},
+                             headers={"x-user": who})
+        if r.status_code == 202:
+            self.wait_as(who, r.json()["id"])
+        return r
+
+    def wait_as(self, who, job_id, timeout=10):
+        end = time.time() + timeout
+        while time.time() < end:
+            job = self.client.get(f"/api/jobs/{job_id}", headers={"x-user": who}).json()
+            if job["state"] in ("done", "failed"):
+                return job
+            time.sleep(0.05)
+        self.fail("job did not finish")
+
+    def spent(self, who):
+        return self.client.get("/api/settings", headers={"x-user": who}).json()["spent_today_usd"]
+
+    def test_one_users_cap_does_not_block_another_user(self):
+        self.assertEqual(self.regen("alice", 1).status_code, 202)
+        self.assertEqual(self.regen("alice", 2).status_code, 202)
+        denied = self.regen("alice", 1)                       # cap 0.12, price 0.05: a third image does not fit
+        self.assertEqual(denied.status_code, 429)
+        self.assertIn("daily", denied.json()["detail"]["message"])
+        self.assertEqual(self.regen("bob", 1).status_code, 202)
+        self.assertEqual((self.spent("alice"), self.spent("bob")), (0.10, 0.05))
+
+    def test_a_failed_generation_gives_the_money_back_to_the_right_user(self):
+        self.images.fail = True
+        self.assertEqual(self.regen("alice", 1).status_code, 202)
+        self.assertEqual((self.spent("alice"), self.spent("bob")), (0.0, 0.0))
+
+    def test_monthly_budget_pauses_everyone(self):
+        from dataclasses import replace
+        self.use_app(self.deps, replace(self.settings, monthly_cap_usd=0.07))
+        self.assertEqual(self.regen("alice", 1).status_code, 202)
+        denied = self.regen("bob", 1)
+        self.assertEqual(denied.status_code, 429)
+        self.assertIn("monthly", denied.json()["detail"]["message"])
+        self.assertEqual(self.spent("bob"), 0.0)
+
+    def test_two_quick_clicks_for_the_same_shot_cost_once(self):
+        self.images.hold = threading.Event()
+        first = self.client.post("/api/projects/demo/shots/1/regenerate", json={"confirm": True},
+                                 headers={"x-user": "alice"})
+        second = self.client.post("/api/projects/demo/shots/1/regenerate", json={"confirm": True},
+                                  headers={"x-user": "alice"})
+        self.images.hold.set()
+        self.wait_as("alice", first.json()["id"])
+        self.assertEqual((first.status_code, second.status_code), (202, 409))
+        self.assertEqual(self.spent("alice"), 0.05)
 
 
 if __name__ == "__main__":

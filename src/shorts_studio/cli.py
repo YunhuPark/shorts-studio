@@ -177,14 +177,14 @@ def cmd_worker(a: argparse.Namespace) -> int:
     from .api.app import Deps, Settings
     from .api.handlers import JobContext, handle, refund_orphan
     from .api.jobqueue import JobQueue
-    from .api.spend import SpendLedger
+    from .api.ledger import CreditLedger
     from .api.worker import Worker
 
     settings = Settings.from_env()
     settings.root = Path(a.data)
     deps = Deps()
-    ctx = JobContext(settings.root, SpendLedger(settings.root / "spend.jsonl"), deps.image_provider,
-                     deps.voice_provider, deps.render_fn)
+    ledger = CreditLedger(settings.root / "ledger.sqlite3", legacy_jsonl=settings.root / "spend.jsonl")
+    ctx = JobContext(settings.root, ledger, deps.image_provider, deps.voice_provider, deps.render_fn)
     worker = Worker(JobQueue(settings.root / "jobs.sqlite3"), lambda job, report: handle(ctx, job, report),
                     lambda job: refund_orphan(ctx, job))
     print(f"worker {worker.id} waiting for jobs (data: {settings.root.resolve()}); Ctrl+C to stop")

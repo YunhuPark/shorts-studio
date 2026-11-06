@@ -61,8 +61,10 @@ npm --prefix frontend run dev -- -p 3010                        # UI -> http://l
 - Keys come from the environment of the **API process** (`AZURE_SPEECH_KEY/REGION`, `GEMINI_API_KEY`) and are never
   sent to the browser; the UI only shows whether they are set.
 - Paid actions (image regeneration) need an explicit confirmation and stop at an estimated daily cap
-  (`SHORTS_DAILY_CAP_USD`, default 2.00; unit price estimate `SHORTS_IMAGE_PRICE_USD`, default 0.067). The ledger is
-  `.data/spend.jsonl` and holds estimates, not invoices.
+  per user (`SHORTS_DAILY_CAP_USD`, default 2.00; unit price estimate `SHORTS_IMAGE_PRICE_USD`, default 0.067), plus an
+  optional budget shared by everyone (`SHORTS_MONTHLY_CAP_USD`, default 0 = off). The ledger is `.data/ledger.sqlite3`
+  (an old `spend.jsonl` is imported once) and holds estimates, not invoices. A reservation is checked and recorded in one
+  transaction, so quick clicks or several workers cannot overshoot a cap, and it is refunded at most once.
 - Port 8000 is reserved by Windows on some machines (that is why the default is 8765). The frontend proxies `/api/*` to
   `API_ORIGIN` (default `http://127.0.0.1:8765`).
 - Jobs (image regeneration, render) are rows in `<data>/jobs.sqlite3`, so they survive restarts. By default two worker
