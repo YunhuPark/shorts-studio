@@ -1,7 +1,56 @@
 # shorts-studio
 
-Storyboard → images → voices → rendered 9:16 short. Phase 0 of the service MVP in
-[docs/mvp-design.md](docs/mvp-design.md): the prototype refactored into a provider-based library and CLI.
+스토리보드 한 장에서 **이미지 → 목소리 → 자막 → 배경음악 → 9:16 쇼츠 영상**까지 만들어 주는 파이프라인과,
+그 과정을 눈으로 확인하고 고치는 대시보드입니다. (Storyboard → images → voices → rendered 9:16 short.)
+
+![대시보드 둘러보기](docs/media/dashboard-tour.gif)
+
+> 예제 작품 「새벽 3시, 컵라면 두 개」(26컷, 약 91초)는 이 파이프라인으로 만들었습니다. 영상 파일은 저장소에 넣지 않았습니다.
+> 이미지는 Gemini, 음성은 Azure Speech로 생성한 AI 생성물이며 영상에는 "AI 생성" 표시를 넣을 수 있습니다.
+
+## 무엇을 풀었나
+"AI로 만든 티가 나는 영상"을 줄이는 쪽에 시간을 썼습니다. 문제를 눈으로 발견하고, 고치고, 숫자로 확인하는 순서였습니다.
+
+| 문제 | 해결 | 확인 |
+|---|---|---|
+| 컷마다 인물 얼굴이 달라짐 | 기준 이미지를 요청마다 첨부, OpenCV(YuNet+SFace)로 얼굴 일치 검사 | 정면 컷 8개 일치(0.44~0.86), 옆·뒷모습은 보수적으로 "확인 필요" 표시 |
+| 화면이 흔들려 보임 | PIL 서브픽셀 카메라 + 위상 상관 지표로 흔들림 측정 | `scripts/measure_shake.py` |
+| 자막이 어색하게 끊김, 문장 끝 마침표 | 한국어 어절 단위 균형 분할, 수사·관형어 뒤 끊김 금지 | 단위 테스트 + 실제 렌더 프레임 |
+| 할아버지 목소리가 "그냥 낮은 목소리" | 목소리 카탈로그와 추천(음높이 실측), 내레이션 모드 | 한계도 화면에 표시 |
+| 유료 API 비용 폭주 | 사용자별 일일 한도·월 예산, 예약 후 환불 원장(SQLite) | 스레드·프로세스 동시 요청에서도 한도 초과 없음을 테스트 |
+| 오픈소스를 잘못 고를 위험 | 코드가 아니라 **모델 가중치** 라이선스까지 확인한 결정 기록 | [docs/open-source-decisions.md](docs/open-source-decisions.md) |
+
+## 구조
+```mermaid
+flowchart LR
+  UI["Next.js 대시보드"] -->|"/api (rewrite)"| API["FastAPI"]
+  API -->|"작업 등록"| Q[("SQLite 작업 큐")]
+  Q --> W["워커 (API 안 스레드 또는 별도 프로세스)"]
+  W --> IMG["Gemini 이미지 API"]
+  W --> TTS["Azure Speech TTS"]
+  W --> R["렌더러: PIL 카메라 + ffmpeg 믹싱"]
+  API --> L[("사용자별 크레딧 원장")]
+  API --> V["OpenCV 얼굴 일치 검사 (로컬)"]
+  API --> S["입력 검수 (단어·패턴)"]
+```
+설계 문서: [docs/mvp-design.md](docs/mvp-design.md), 단계별 계획과 결과: [docs/phase1-plan.md](docs/phase1-plan.md).
+
+## 검증 방식
+- 단위 테스트 190개, 브라우저(Playwright) 테스트 16개, `ruff` 통과.
+- **테스트가 정말 잡아내는지 확인**하려고 코드를 일부러 망가뜨리는 변형 검증을 했습니다. 이 과정에서 약한 테스트 여러 개
+  (항상 통과하던 테스트, 다른 요소에 맞아 통과하던 단언)를 찾아 고쳤고, 그 기록은 [open-source-decisions.md](docs/open-source-decisions.md)에,
+  단계별 변형 검증 결과는 [phase1-plan.md](docs/phase1-plan.md)에 남겼습니다.
+- 한계도 그대로 기록했습니다: 실제 Supabase 로그인과 결제는 만들지 않았고(범위 밖), 입력 검수는 단어·패턴 수준이며,
+  노년 음색은 근사치이고, 큐의 동시 claim 락은 테스트로 증명하지 못했습니다.
+
+## 화면
+| | |
+|---|---|
+| ![프로젝트](docs/media/02-project-top.png) | ![스토리보드](docs/media/03-storyboard.png) |
+| ![실시간 자막 미리보기](docs/media/04-live-subtitles.png) | ![목소리 추천](docs/media/05-voice-recommend.png) |
+| ![얼굴 일치 검사](docs/media/06-face-check.png) | ![렌더](docs/media/07-render.png) |
+
+아래부터는 사용법과 개발 메모입니다. (Phase 0: prototype → provider-based library and CLI.)
 
 ## Layout
 ```
