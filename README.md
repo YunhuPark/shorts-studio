@@ -3,6 +3,8 @@
 스토리보드 한 장에서 **이미지 → 목소리 → 자막 → 배경음악 → 9:16 쇼츠 영상**까지 만들어 주는 파이프라인과,
 그 과정을 눈으로 확인하고 고치는 대시보드입니다. (Storyboard → images → voices → rendered 9:16 short.)
 
+[![CI](https://github.com/YunhuPark/shorts-studio/actions/workflows/ci.yml/badge.svg)](https://github.com/YunhuPark/shorts-studio/actions/workflows/ci.yml)
+
 ![대시보드 둘러보기](docs/media/dashboard-tour.gif)
 
 > 예제 작품 「새벽 3시, 컵라면 두 개」(26컷, 약 91초)는 이 파이프라인으로 만들었습니다. 영상 파일은 저장소에 넣지 않았습니다.
