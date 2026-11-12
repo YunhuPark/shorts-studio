@@ -5,11 +5,16 @@ import base from "./playwright.config";
 const API = "http://127.0.0.1:8766";
 const WEB = "http://127.0.0.1:3011";
 
+// DEMO_URL=http://127.0.0.1:3100 runs the same tests against an already running demo (the container, a deployed site)
+// instead of starting the servers. Raise the demo's rate limit for that run (SHORTS_DEMO_RATE): the tests click a lot.
+const external = process.env.DEMO_URL;
+
 export default defineConfig({
   ...base,
   testMatch: "demo.spec.ts",
   testIgnore: undefined,
-  webServer: [
+  use: { ...base.use, baseURL: external ?? base.use?.baseURL },
+  webServer: external ? undefined : [
     {
       command: "..\\.venv\\Scripts\\python.exe ..\\tests\\e2e_server.py --port 8766 --demo",
       url: `${API}/api/health`,
