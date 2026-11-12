@@ -136,6 +136,10 @@ set SHORTS_ALLOWED_HOSTS=studio.example.com              # the site's public hos
 Expiry, audience (`authenticated`) and issuer are checked, and the accepted algorithms are fixed by the mode you configure.
 The browser login screen is not built yet, so only API clients can sign in for now.
 
+## License
+Source code: [MIT](LICENSE). Third-party files and dependencies keep their own licenses, and the AI-generated media in `demo/` and
+`docs/media/` is not licensed for reuse: see [NOTICE.md](NOTICE.md).
+
 ## Continuous integration
 `.github/workflows/ci.yml` runs on every push to `main` and every pull request: lint + unit tests (with the face models downloaded and
 sha256-checked), type check + both browser suites (fake providers, and the real demo bundle), and a build of the demo image that is
