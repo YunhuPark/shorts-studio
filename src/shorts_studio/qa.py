@@ -44,7 +44,8 @@ def lint(sb: Storyboard) -> list[Issue]:
                 issues.append(Issue("warn", s.n, f"subtitle phrase is long ({len(phrase)}): '{phrase}'"))
         if not s.scene:
             issues.append(Issue("warn", s.n, "no scene description for the image"))
-    return issues
+    from .safety import check_storyboard  # imported here: safety builds on Issue, defined above
+    return issues + check_storyboard(sb)
 
 
 def missing_images(sb: Storyboard, images: ImageSource) -> list[int]:

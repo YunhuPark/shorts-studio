@@ -26,6 +26,7 @@ from ..render import render as render_storyboard
 from ..render.bgm import DEFAULT_STYLE as DEFAULT_BGM_STYLE
 from ..render.bgm import STYLES as BGM_STYLES
 from ..render.subtitles import split_phrases
+from ..safety import blocking_issues
 from ..vision.faces import SAME_PERSON_COSINE, check_shots
 from ..vision.fetch import ModelError
 from . import voices as voices_catalog
@@ -280,6 +281,10 @@ def create_app(settings: Settings | None = None, deps: Deps | None = None) -> Fa
         shot = sb.shot(n)
         if shot is None:
             raise HTTPException(404, f"shot {n} not found")
+        blocked = blocking_issues(sb, n)
+        if blocked:  # nothing is reserved or sent to the image provider
+            raise HTTPException(422, {"message": "; ".join(dict.fromkeys(i.message for i in blocked)),
+                                      "issues": [{"shot": i.shot, "message": i.message} for i in blocked]})
         est = settings.image_price_usd
         if not body.confirm:
             raise HTTPException(400, {"message": "confirm required", "estimated_usd": est})
@@ -303,6 +308,10 @@ def create_app(settings: Settings | None = None, deps: Deps | None = None) -> Fa
         if body.bgm_style not in BGM_STYLES:
             raise HTTPException(422, f"unknown bgm style; choose one of {sorted(BGM_STYLES)}")
         sb = store.load(pid)
+        blocked = blocking_issues(sb)
+        if blocked:
+            raise HTTPException(422, {"message": "; ".join(dict.fromkeys(i.message for i in blocked)),
+                                      "issues": [{"shot": i.shot, "message": i.message} for i in blocked]})
         only = set(body.only) if body.only else None
         total = sum(1 for sh in sb.shots if (only is None or sh.n in only) and store.image_path(pid, sh.n))
         if total == 0:

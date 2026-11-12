@@ -87,11 +87,19 @@ set SHORTS_ALLOWED_HOSTS=studio.example.com              # the site's public hos
 Expiry, audience (`authenticated`) and issuer are checked, and the accepted algorithms are fixed by the mode you configure.
 The browser login screen is not built yet, so only API clients can sign in for now.
 
+## Input screening
+`lint`, the dashboard's check list and the API run a first-line screen over every title, description, line and scene
+(`src/shorts_studio/safety.py`). Clear violations (sexual content, minors in sexual content, suicide/self-harm methods,
+weapon or drug recipes, deepfakes/fraud) are errors: image regeneration and rendering are refused with an explanation and
+nothing is reserved or sent to a provider. Graphic violence only warns. Drafts can still be saved. It is a transparent word
+list, not moderation: it cannot read intent, hate speech or real people's names, and it can be phrased around. Review the
+lists before opening the service to others.
+
 ## Quality tooling
 ```bash
 .venv/Scripts/python -m pip install -e ".[api,vision,dev]"      # + opencv-python-headless, ruff
 .venv/Scripts/ruff check .                                       # lint (config in pyproject.toml)
-.venv/Scripts/python -m unittest discover -s tests               # 170 tests
+.venv/Scripts/python -m unittest discover -s tests               # 190 tests
 
 python -m shorts_studio fetch-models                             # YuNet + SFace (~37 MB, sha256-checked, not in git)
 python -m shorts_studio face-check examples/convenience-store/storyboard.json --images <folder>     --reference grandpa=<folder>/cut05.png --reference alba=<folder>/cut13.png

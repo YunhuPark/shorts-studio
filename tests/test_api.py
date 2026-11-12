@@ -634,5 +634,51 @@ class UserLimits(ApiTest):
         self.assertEqual(self.spent("alice"), 0.05)
 
 
+class SafetyGate(ApiTest):
+    """Clear policy violations stop paid work and rendering; drafts can still be saved and are flagged."""
+
+    def edit(self, n, **fields):
+        r = self.client.patch(f"/api/projects/demo/shots/{n}", json=fields)
+        self.assertEqual(r.status_code, 200, r.text)
+
+    def issues(self):
+        return self.client.get("/api/projects/demo").json()["issues"]
+
+    def test_a_blocked_scene_is_saved_and_flagged_but_never_sent_to_the_image_provider(self):
+        self.edit(1, scene="porn scene")
+        flagged = [i for i in self.issues() if i["shot"] == 1 and i["level"] == "error"]
+        self.assertTrue(flagged)
+        r = self.client.post("/api/projects/demo/shots/1/regenerate", json={"confirm": True})
+        self.assertEqual(r.status_code, 422)
+        self.assertIn("성적", r.json()["detail"]["message"])
+        self.assertEqual(self.images.calls, [])                                    # nothing reached the provider
+        self.assertEqual(self.client.get("/api/settings").json()["spent_today_usd"], 0)   # and nothing was reserved
+        self.assertEqual(self.client.get("/api/projects/demo/jobs").json(), [])
+
+    def test_other_shots_are_not_blocked_by_one_bad_shot(self):
+        self.edit(1, scene="porn scene")
+        r = self.client.post("/api/projects/demo/shots/2/regenerate", json={"confirm": True})
+        self.assertEqual(r.status_code, 202)
+        self.wait_job(r.json()["id"])
+
+    def test_rendering_is_refused_while_any_shot_is_blocked(self):
+        self.edit(2, text="a deepfake of the mayor")
+        r = self.client.post("/api/projects/demo/render", json={})
+        self.assertEqual(r.status_code, 422)
+        self.assertEqual(self.render_calls, [])
+        self.assertEqual(self.client.get("/api/projects/demo/jobs").json(), [])
+        self.edit(2, text="집사람 몫이야.")                                          # fixed: it can render again
+        r = self.client.post("/api/projects/demo/render", json={})
+        self.assertEqual(r.status_code, 202)
+        self.wait_job(r.json()["id"])
+
+    def test_a_warning_such_as_gore_does_not_block(self):
+        self.edit(1, scene="a gory battlefield")
+        self.assertTrue([i for i in self.issues() if i["shot"] == 1 and i["level"] == "warn"])
+        r = self.client.post("/api/projects/demo/shots/1/regenerate", json={"confirm": True})
+        self.assertEqual(r.status_code, 202)
+        self.wait_job(r.json()["id"])
+
+
 if __name__ == "__main__":
     unittest.main()
