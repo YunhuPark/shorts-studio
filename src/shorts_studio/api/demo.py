@@ -65,6 +65,34 @@ class RateLimiter:
             return True
 
 
+PREVIEW_PATH = "/api/subtitles/preview"
+
+
+def client_address(forwarded: str, peer: str, hops: int) -> str:
+    """Who is calling? hops=0: the connection itself (do not trust X-Forwarded-For). hops=n: n trusted proxies each
+    appended the address they saw, so the visitor is the n-th entry from the right; the entries further left are
+    whatever the visitor sent and are never used."""
+    if hops <= 0:
+        return peer
+    parts = [p.strip() for p in forwarded.split(",") if p.strip()]
+    return parts[-hops] if len(parts) >= hops else peer
+
+
+class DemoLimits:
+    """Three budgets per minute for requests that are not plain reads."""
+
+    def __init__(self, per_client: int, window: float = 60.0, clock: Callable[[], float] = time.monotonic):
+        self.client = RateLimiter(per_client, window, clock)
+        # the live subtitle preview is a cheap, pure POST sent every time someone pauses while typing
+        self.preview = RateLimiter(per_client * 10, window, clock)
+        # last line of defence: if visitors cannot be told apart (a wrong proxy setting), the total is still capped
+        self.everyone = RateLimiter(per_client * 20, window, clock)
+
+    def allow(self, client: str, path: str) -> bool:
+        bucket = self.preview if path == PREVIEW_PATH else self.client
+        return bucket.allow(client) and self.everyone.allow("*")
+
+
 def simulate_regenerate(n: int, report, sleep: Callable[[float], None] = time.sleep) -> str:
     steps = (
         "프롬프트를 준비하는 중 (데모: 실제 이미지 호출 없음)",

@@ -65,6 +65,24 @@ class Helpers(unittest.TestCase):
         limiter.allow("fresh")
         self.assertLess(len(limiter._hits), 10)
 
+    def test_client_address_picks_the_entry_the_trusted_proxies_added(self):
+        peer = "10.1.1.1"
+        self.assertEqual(demo.client_address("1.1.1.1, 2.2.2.2", peer, 0), peer)    # not trusted: header ignored
+        self.assertEqual(demo.client_address("1.1.1.1, 2.2.2.2, 3.3.3.3", peer, 1), "3.3.3.3")
+        self.assertEqual(demo.client_address("1.1.1.1, 2.2.2.2, 3.3.3.3", peer, 2), "2.2.2.2")
+        self.assertEqual(demo.client_address(" 1.1.1.1 ,, 2.2.2.2 ", peer, 1), "2.2.2.2")  # spaces and blanks
+        self.assertEqual(demo.client_address("2.2.2.2", peer, 2), peer)                    # fewer entries than proxies
+        self.assertEqual(demo.client_address("", peer, 1), peer)
+
+    def test_demo_limits_keep_three_separate_budgets(self):
+        now = [0.0]
+        limits = demo.DemoLimits(2, window=60, clock=lambda: now[0])     # per visitor 2, preview 20, everyone 40
+        self.assertEqual([limits.allow("a", "/x") for _ in range(3)], [True, True, False])
+        self.assertTrue(all(limits.allow("a", demo.PREVIEW_PATH) for _ in range(20)))
+        self.assertFalse(limits.allow("a", demo.PREVIEW_PATH))
+        now[0] = 61
+        self.assertTrue(limits.allow("a", "/x"))                          # a new minute
+
     def test_seed_needs_the_assets_and_is_idempotent(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -204,31 +222,54 @@ class DemoRateLimit(unittest.TestCase):
         self.addCleanup(app.state.stop_workers)
         return TestClient(app)
 
+    def change(self, client, headers=None):
+        """Any POST that is not the subtitle preview: it spends the per-visitor budget."""
+        return client.post(f"/api/projects/{demo.DEMO_PROJECT}/face-check", headers=headers or {})
+
+    def preview(self, client, headers=None):
+        return client.post("/api/subtitles/preview", json={"text": "a"}, headers=headers or {})
+
     def test_changing_requests_are_limited_but_reading_is_not(self):
         client = self.make(demo_rate_limit=3)
-        post = lambda: client.post("/api/subtitles/preview", json={"text": "a"}).status_code  # noqa: E731
-        self.assertEqual([post() for _ in range(5)], [200, 200, 200, 429, 429])
+        self.assertEqual([self.change(client).status_code for _ in range(5)], [200, 200, 200, 429, 429])
         self.assertEqual(client.get("/api/health").status_code, 200)
-        r = client.post("/api/subtitles/preview", json={"text": "a"})
-        self.assertEqual(r.headers["retry-after"], "60")
+        self.assertEqual(self.change(client).headers["retry-after"], "60")
         for _ in range(20):
             self.assertEqual(client.get("/api/projects").status_code, 200)
 
-    def test_behind_a_trusted_proxy_each_forwarded_client_has_its_own_budget(self):
-        client = self.make(demo_rate_limit=2, trust_proxy=True)
+    def test_one_trusted_proxy_each_forwarded_client_has_its_own_budget(self):
+        client = self.make(demo_rate_limit=2, proxy_hops=1)
 
         def post(ip):
-            headers = {"x-forwarded-for": f"9.9.9.9, {ip}"}   # a client-supplied first hop, then the proxy's view
-            return client.post("/api/subtitles/preview", json={"text": "a"}, headers=headers)
+            # a visitor-supplied first hop, then the address the proxy saw
+            return self.change(client, {"x-forwarded-for": f"9.9.9.9, {ip}"})
         self.assertEqual([post("1.1.1.1").status_code for _ in range(3)], [200, 200, 429])
         self.assertEqual(post("2.2.2.2").status_code, 200)      # a different visitor behind the same proxy
 
+    def test_two_trusted_proxies_the_visitor_is_the_second_entry_from_the_right(self):
+        client = self.make(demo_rate_limit=2, proxy_hops=2)
+
+        def post(visitor, spoof):
+            return self.change(client, {"x-forwarded-for": f"{spoof}, {visitor}, 10.0.0.1"})
+        # whatever the visitor writes at the far left changes nothing: same visitor, same budget
+        self.assertEqual([post("1.1.1.1", f"6.6.6.{i}").status_code for i in range(3)], [200, 200, 429])
+        self.assertEqual(post("2.2.2.2", "6.6.6.6").status_code, 200)
+
     def test_without_a_trusted_proxy_the_forwarded_header_cannot_be_used_to_dodge_the_limit(self):
         client = self.make(demo_rate_limit=2)
-        codes = [client.post("/api/subtitles/preview", json={"text": "a"},
-                             headers={"x-forwarded-for": f"7.7.7.{i}"}).status_code for i in range(4)]
+        codes = [self.change(client, {"x-forwarded-for": f"7.7.7.{i}"}).status_code for i in range(4)]
         self.assertEqual(codes, [200, 200, 429, 429])
 
+    def test_the_live_subtitle_preview_has_a_bigger_budget_of_its_own(self):
+        client = self.make(demo_rate_limit=2)
+        previews = [self.preview(client).status_code for _ in range(22)]
+        self.assertEqual(previews, [200] * 20 + [429, 429])      # 10x the per-visitor budget
+        self.assertEqual(self.change(client).status_code, 200)   # typing did not use up the change budget
+
+    def test_everyone_together_is_capped_even_when_visitors_cannot_be_told_apart(self):
+        client = self.make(demo_rate_limit=2, proxy_hops=1)      # global cap = 20 x 2 = 40 per minute
+        codes = [self.change(client, {"x-forwarded-for": f"8.8.{i // 250}.{i % 250}"}).status_code for i in range(42)]
+        self.assertEqual(codes, [200] * 40 + [429, 429])         # every request came from a "new" visitor
 
 if __name__ == "__main__":
     unittest.main()

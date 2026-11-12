@@ -160,9 +160,13 @@ npm --prefix frontend run dev -- -p 3010                     # then open http://
 docker build -t shorts-studio-demo . && docker run --rm -p 3000:3000 shorts-studio-demo      # one container, API + UI
 cd frontend && npm run test:e2e:demo                          # browser tests against the real bundle
 ```
-Behind a reverse proxy that appends the visitor's address to `X-Forwarded-For`, also set `SHORTS_TRUST_PROXY=1`; otherwise all
-visitors share the proxy's rate-limit budget. The image (`Dockerfile`) installs only fastapi, uvicorn, pillow and numpy: the demo
+Behind reverse proxies that append the visitor's address to `X-Forwarded-For`, set `SHORTS_PROXY_HOPS` to how many of them you trust
+(the visitor is that many entries from the right; everything further left is ignored); with the default `0` all visitors share the
+proxy's budget. Changing requests have three budgets per minute: per visitor (`SHORTS_DEMO_RATE`, default 30), ten times that for the
+cheap live subtitle preview, and twenty times it for everyone together, which still caps the total if visitors cannot be told apart. The image (`Dockerfile`) installs only fastapi, uvicorn, pillow and numpy: the demo
 never renders, so ffmpeg and OpenCV are left out.
+
+Step-by-step deployment to Google Cloud Run (scale-to-zero, cost caps, how to check the visitor rate limit): [docs/DEPLOY.md](docs/DEPLOY.md).
 
 ## Input screening
 `lint`, the dashboard's check list and the API run a first-line screen over every title, description, line and scene
@@ -176,7 +180,7 @@ lists before opening the service to others.
 ```bash
 .venv/Scripts/python -m pip install -e ".[api,vision,dev]"      # + opencv-python-headless, ruff
 .venv/Scripts/ruff check .                                       # lint (config in pyproject.toml)
-.venv/Scripts/python -m unittest discover -s tests               # 208 tests
+.venv/Scripts/python -m unittest discover -s tests               # 213 tests
 
 python -m shorts_studio fetch-models                             # YuNet + SFace (~37 MB, sha256-checked, not in git)
 python -m shorts_studio face-check examples/convenience-store/storyboard.json --images <folder>     --reference grandpa=<folder>/cut05.png --reference alba=<folder>/cut13.png

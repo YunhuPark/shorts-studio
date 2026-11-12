@@ -7,6 +7,8 @@ const API_ORIGIN = process.env.API_ORIGIN ?? "http://127.0.0.1:8765";
 const nextConfig: NextConfig = {
   // end-to-end tests build into their own folder so they never disturb a running dev server
   distDir: process.env.NEXT_DIST_DIR ?? ".next",
+  // the demo image builds a self-contained server with only the files it needs (set by the Dockerfile)
+  ...(process.env.NEXT_STANDALONE === "1" ? { output: "standalone" as const } : {}),
   cacheComponents: true,
   partialPrefetching: true,
   async rewrites() {

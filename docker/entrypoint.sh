@@ -5,7 +5,8 @@ set -e
 python -m shorts_studio serve --data "$SHORTS_DATA" --port 8765 &
 api=$!
 cd /app/frontend
-node_modules/.bin/next start -p "${PORT:-3000}" -H 0.0.0.0 &
+# the standalone server reads PORT and HOSTNAME; HOSTNAME defaults to the container's own name, so set it
+HOSTNAME=0.0.0.0 PORT="${PORT:-3000}" node server.js &
 web=$!
 trap 'kill "$api" "$web" 2>/dev/null' TERM INT
 while kill -0 "$api" 2>/dev/null && kill -0 "$web" 2>/dev/null; do sleep 2; done

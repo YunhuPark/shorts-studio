@@ -58,7 +58,7 @@ class Settings:
     demo: bool = False               # public demo: no provider is ever called, edits are not saved (see api/demo.py)
     demo_dir: Path = Path("demo")
     demo_rate_limit: int = 30        # changing requests per minute per client in demo mode
-    trust_proxy: bool = False        # behind one trusted reverse proxy: take the client address from X-Forwarded-For
+    proxy_hops: int = 0              # trusted proxies in front, each appending to X-Forwarded-For; 0 = the connection
 
     @classmethod
     def from_env(cls) -> Settings:
@@ -67,7 +67,7 @@ class Settings:
         if os.environ.get("SHORTS_DEMO") == "1":
             extra |= {"demo": True, "demo_dir": Path(os.environ.get("SHORTS_DEMO_DIR", "demo")),
                       "demo_rate_limit": int(os.environ.get("SHORTS_DEMO_RATE", "30")),
-                      "trust_proxy": os.environ.get("SHORTS_TRUST_PROXY") == "1"}
+                      "proxy_hops": int(os.environ.get("SHORTS_PROXY_HOPS", "0"))}
         return cls(Path(os.environ.get("SHORTS_DATA", ".data")),
                    float(os.environ.get("SHORTS_IMAGE_PRICE_USD", "0.067")),
                    float(os.environ.get("SHORTS_DAILY_CAP_USD", "2.0")),
@@ -147,15 +147,15 @@ def create_app(settings: Settings | None = None, deps: Deps | None = None) -> Fa
     app.add_middleware(TrustedHostMiddleware, allowed_hosts=list(settings.allowed_hosts))
     if settings.demo:
         demo_mode.seed(settings.root, settings.demo_dir)
-        limiter = demo_mode.RateLimiter(settings.demo_rate_limit)
+        limits = demo_mode.DemoLimits(settings.demo_rate_limit)
 
         @app.middleware("http")
         async def demo_rate_limit(request: Request, call_next):
             if request.method not in ("GET", "HEAD", "OPTIONS"):
-                client = request.client.host if request.client else "unknown"
-                if settings.trust_proxy:   # one trusted proxy appends the real address last
-                    client = request.headers.get("x-forwarded-for", "").split(",")[-1].strip() or client
-                if not limiter.allow(client):
+                peer = request.client.host if request.client else "unknown"
+                client = demo_mode.client_address(request.headers.get("x-forwarded-for", ""), peer,
+                                                  settings.proxy_hops)
+                if not limits.allow(client, request.url.path):
                     return JSONResponse({"detail": {"message": "요청이 너무 많습니다. 잠시 뒤 다시 시도하세요."}},
                                         status_code=429, headers={"Retry-After": "60"})
             return await call_next(request)
