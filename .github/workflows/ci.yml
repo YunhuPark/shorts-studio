@@ -1,0 +1,83 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  python:
+    name: Lint and unit tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: pyproject.toml
+      - run: pip install -e ".[api,auth,vision,dev]"
+      # the face models are not in git; this downloads them and checks their sha256
+      - run: python -m shorts_studio fetch-models
+      - run: ruff check .
+      - run: python -m unittest discover -s tests
+
+  web:
+    name: Type check and browser tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      # the browser tests start the API with the repository's virtualenv (see frontend/playwright.shared.ts)
+      - run: python -m venv .venv && .venv/bin/pip install -e ".[api,auth,dev]"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - run: npm ci
+        working-directory: frontend
+      - run: npx tsc --noEmit
+        working-directory: frontend
+      - run: npx playwright install --with-deps chromium
+        working-directory: frontend
+      - run: npm run test:e2e
+        working-directory: frontend
+      - run: npm run test:e2e:demo
+        working-directory: frontend
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: playwright-results
+          path: frontend/test-results
+          retention-days: 7
+
+  docker:
+    name: Demo image builds and answers
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: docker build -t shorts-studio-demo .
+      - name: Run it and check the demo responds
+        run: |
+          docker run -d --name demo -p 3000:3000 shorts-studio-demo
+          for i in $(seq 1 30); do
+            curl -fsS http://127.0.0.1:3000/api/health >/dev/null 2>&1 && break
+            sleep 2
+          done
+          curl -fsS http://127.0.0.1:3000/api/settings | grep -q '"demo":true'
+          curl -fsS -o /dev/null -w '%{http_code} %{content_type}\n' http://127.0.0.1:3000/api/projects/convenience-store/images/5
+          code=$(curl -s -o /dev/null -w '%{http_code}' -X PATCH -H 'Content-Type: application/json' \
+            -d '{"text":"x"}' http://127.0.0.1:3000/api/projects/convenience-store/shots/1)
+          test "$code" = "403"
+      - if: failure()
+        run: docker logs demo

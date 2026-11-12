@@ -1,4 +1,5 @@
 import { defineConfig, devices } from "@playwright/test";
+import { E2E_SERVER, PYTHON } from "./playwright.shared";
 
 // End-to-end tests run against a private API with fake providers (tests/e2e_server.py) and a production build
 // of the frontend in its own folder, so they never touch real keys, paid services, or a dev server you have open.
@@ -18,7 +19,7 @@ export default defineConfig({
   projects: [{ name: "chromium", use: { ...devices["Desktop Chrome"] } }],
   webServer: [
     {
-      command: `..\\.venv\\Scripts\\python.exe ..\\tests\\e2e_server.py --port ${API_PORT}`,
+      command: `${PYTHON} ${E2E_SERVER} --port ${API_PORT}`,
       url: `${API}/api/health`,
       reuseExistingServer: false,
       timeout: 60_000,

@@ -136,6 +136,11 @@ set SHORTS_ALLOWED_HOSTS=studio.example.com              # the site's public hos
 Expiry, audience (`authenticated`) and issuer are checked, and the accepted algorithms are fixed by the mode you configure.
 The browser login screen is not built yet, so only API clients can sign in for now.
 
+## Continuous integration
+`.github/workflows/ci.yml` runs on every push to `main` and every pull request: lint + unit tests (with the face models downloaded and
+sha256-checked), type check + both browser suites (fake providers, and the real demo bundle), and a build of the demo image that is
+started and probed. The same steps were reproduced locally in Linux containers (Python 3.12 and Node 22) before the first push.
+
 ## Public demo (no keys, no cost)
 `SHORTS_DEMO=1` turns the dashboard into a safe public demo: no key is read and no paid service is ever called. It serves a
 pre-built bundle in `demo/` (540 px images, one finished video, pre-made voice samples, a pre-computed face check; about 6 MB,

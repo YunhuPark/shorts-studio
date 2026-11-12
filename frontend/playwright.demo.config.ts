@@ -1,5 +1,6 @@
 import { defineConfig } from "@playwright/test";
 import base from "./playwright.config";
+import { E2E_SERVER, PYTHON } from "./playwright.shared";
 
 // Runs e2e/demo.spec.ts against the real demo/ bundle served in demo mode (no keys, no providers): `npm run test:e2e:demo`.
 const API = "http://127.0.0.1:8766";
@@ -16,7 +17,7 @@ export default defineConfig({
   use: { ...base.use, baseURL: external ?? base.use?.baseURL },
   webServer: external ? undefined : [
     {
-      command: "..\\.venv\\Scripts\\python.exe ..\\tests\\e2e_server.py --port 8766 --demo",
+      command: `${PYTHON} ${E2E_SERVER} --port 8766 --demo`,
       url: `${API}/api/health`,
       reuseExistingServer: false,
       timeout: 60_000,
