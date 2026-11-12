@@ -13,6 +13,7 @@ from pathlib import Path
 from ..generate import plan_generation, run_generation
 from ..providers import DirectoryImageSource
 from ..render import RenderOptions
+from . import demo
 from .jobqueue import Job
 from .ledger import CreditLedger
 from .store import ProjectStore
@@ -32,10 +33,22 @@ class JobContext:
 
 
 def handle(ctx: JobContext, job: Job, report) -> str | None:
+    if job.params.get("demo"):   # set only by the API in demo mode: replay, never call a provider
+        return handle_demo(ctx, job, report)
     if job.kind.startswith("regenerate-"):
         return regenerate(ctx, job, report)
     if job.kind == "render":
         return render(ctx, job, report)
+    raise ValueError(f"unknown job kind: {job.kind}")
+
+
+def handle_demo(ctx: JobContext, job: Job, report) -> str:
+    if job.kind.startswith("regenerate-"):
+        return demo.simulate_regenerate(int(job.params["n"]), report)
+    if job.kind == "render":
+        store = ProjectStore(ctx.root, job.owner)
+        shots = [s.n for s in store.load(job.project).shots if store.image_path(job.project, s.n)]
+        return demo.simulate_render(shots, report)
     raise ValueError(f"unknown job kind: {job.kind}")
 
 

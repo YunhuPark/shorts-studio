@@ -1,5 +1,6 @@
 "use client";
 
+import { DemoBanner } from "@/components/DemoBanner";
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import { api, ApiError, ProjectSummary, Settings } from "@/lib/api";
@@ -29,7 +30,8 @@ export default function Home() {
       <h1>프로젝트</h1>
       <p className="muted">스토리보드를 고치고, 목소리를 고르고, 컷 이미지를 다시 만들어 영상을 렌더합니다.</p>
       {error && <div className="banner" role="alert">{error}</div>}
-      {settings && (
+      {settings?.demo && <DemoBanner />}
+      {settings && !settings.demo && (
         <div className="stats">
           <span className={`pill ${settings.keys.azure ? "ok" : "bad"}`}>음성(Azure) {settings.keys.azure ? "연결됨" : "키 없음"}</span>
           <span className={`pill ${settings.keys.gemini ? "ok" : "bad"}`}>이미지(Gemini) {settings.keys.gemini ? "연결됨" : "키 없음"}</span>

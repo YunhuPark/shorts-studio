@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { use, useCallback, useEffect, useState } from "react";
 import { api, ApiError, describe, FaceCheck, imageUrl, Project, Settings, Shot } from "@/lib/api";
+import { DemoBanner } from "@/components/DemoBanner";
 import { RenderPanel } from "@/components/RenderPanel";
 import { ShotCard } from "@/components/ShotCard";
 import { VoicePanel } from "@/components/VoicePanel";
@@ -90,6 +91,7 @@ export function ProjectView({ params }: { params: Promise<{ id: string }> }) {
 
   return (
     <>
+      {settings.demo && <DemoBanner />}
       <div className="toolbar">
         <div>
           <p className="small" style={{ margin: 0 }}><Link href="/">← 프로젝트 목록</Link></p>

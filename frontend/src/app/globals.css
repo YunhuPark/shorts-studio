@@ -118,3 +118,4 @@ ul.plain { list-style: none; padding: 0; margin: 8px 0 0; display: grid; gap: 4p
 .recommend .chips { display: inline-flex; gap: 6px; flex-wrap: wrap; }
 .chip-button { border-radius: 999px; padding: 3px 10px; font-size: 0.85rem; }
 .recommend-note { flex-basis: 100%; margin: 0; }
+.banner.demo { background: #1d2b3f; border-color: #3b5f8f; }

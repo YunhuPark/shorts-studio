@@ -84,6 +84,14 @@ class ShotCheck:
     status: str  # "ok" | "drift?" | "small" | "no face"
 
 
+def checks_payload(checks: list[ShotCheck], threshold: float = SAME_PERSON_COSINE) -> dict:
+    """The JSON shape the dashboard API returns (also used to pre-compute the public demo's result)."""
+    return {"threshold": threshold, "checks": [
+        {"shot": c.shot, "status": c.status, "expected": c.expected,
+         "faces": [{"character": f.character, "closest": f.closest, "similarity": round(f.similarity, 3),
+                    "small": f.small} for f in c.faces]} for c in checks]}
+
+
 def reference_embeddings(refs: dict[str, Path], embedder: Embedder) -> dict[str, np.ndarray]:
     out = {}
     for name, path in refs.items():

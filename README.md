@@ -136,6 +136,23 @@ set SHORTS_ALLOWED_HOSTS=studio.example.com              # the site's public hos
 Expiry, audience (`authenticated`) and issuer are checked, and the accepted algorithms are fixed by the mode you configure.
 The browser login screen is not built yet, so only API clients can sign in for now.
 
+## Public demo (no keys, no cost)
+`SHORTS_DEMO=1` turns the dashboard into a safe public demo: no key is read and no paid service is ever called. It serves a
+pre-built bundle in `demo/` (540 px images, one finished video, pre-made voice samples, a pre-computed face check; about 6 MB,
+built by `scripts/build_demo_assets.py`), replays image regeneration and rendering as a progress animation, refuses to save
+edits, and rate-limits every changing request per client. Typing a line still gives the live subtitle preview and the voice
+recommendation and face-check buttons work, so a visitor can follow the whole flow.
+```bash
+SHORTS_DEMO=1 SHORTS_DEMO_DIR=demo SHORTS_DATA=/tmp/shorts-demo python -m shorts_studio serve --data /tmp/shorts-demo --port 8765
+npm --prefix frontend run dev -- -p 3010                     # then open http://localhost:3010
+
+docker build -t shorts-studio-demo . && docker run --rm -p 3000:3000 shorts-studio-demo      # one container, API + UI
+cd frontend && npm run test:e2e:demo                          # browser tests against the real bundle
+```
+Behind a reverse proxy that appends the visitor's address to `X-Forwarded-For`, also set `SHORTS_TRUST_PROXY=1`; otherwise all
+visitors share the proxy's rate-limit budget. The image (`Dockerfile`) installs only fastapi, uvicorn, pillow and numpy: the demo
+never renders, so ffmpeg and OpenCV are left out.
+
 ## Input screening
 `lint`, the dashboard's check list and the API run a first-line screen over every title, description, line and scene
 (`src/shorts_studio/safety.py`). Clear violations (sexual content, minors in sexual content, suicide/self-harm methods,
@@ -148,7 +165,7 @@ lists before opening the service to others.
 ```bash
 .venv/Scripts/python -m pip install -e ".[api,vision,dev]"      # + opencv-python-headless, ruff
 .venv/Scripts/ruff check .                                       # lint (config in pyproject.toml)
-.venv/Scripts/python -m unittest discover -s tests               # 190 tests
+.venv/Scripts/python -m unittest discover -s tests               # 208 tests
 
 python -m shorts_studio fetch-models                             # YuNet + SFace (~37 MB, sha256-checked, not in git)
 python -m shorts_studio face-check examples/convenience-store/storyboard.json --images <folder>     --reference grandpa=<folder>/cut05.png --reference alba=<folder>/cut13.png

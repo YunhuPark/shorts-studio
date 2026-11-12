@@ -1,0 +1,235 @@
+{
+  "threshold": 0.363,
+  "checks": [
+    {
+      "shot": 5,
+      "status": "ok",
+      "expected": [
+        "grandpa"
+      ],
+      "faces": [
+        {
+          "character": "grandpa",
+          "closest": "grandpa",
+          "similarity": 1.0,
+          "small": false
+        }
+      ]
+    },
+    {
+      "shot": 6,
+      "status": "no face",
+      "expected": [
+        "grandpa"
+      ],
+      "faces": []
+    },
+    {
+      "shot": 7,
+      "status": "ok",
+      "expected": [
+        "grandpa",
+        "alba"
+      ],
+      "faces": [
+        {
+          "character": "alba",
+          "closest": "alba",
+          "similarity": 0.53,
+          "small": false
+        }
+      ]
+    },
+    {
+      "shot": 8,
+      "status": "small",
+      "expected": [
+        "grandpa"
+      ],
+      "faces": [
+        {
+          "character": null,
+          "closest": "grandpa",
+          "similarity": 0.132,
+          "small": true
+        }
+      ]
+    },
+    {
+      "shot": 9,
+      "status": "no face",
+      "expected": [
+        "alba",
+        "grandpa"
+      ],
+      "faces": []
+    },
+    {
+      "shot": 12,
+      "status": "ok",
+      "expected": [
+        "grandpa"
+      ],
+      "faces": [
+        {
+          "character": "alba",
+          "closest": "alba",
+          "similarity": 0.495,
+          "small": false
+        }
+      ]
+    },
+    {
+      "shot": 13,
+      "status": "ok",
+      "expected": [
+        "alba"
+      ],
+      "faces": [
+        {
+          "character": "alba",
+          "closest": "alba",
+          "similarity": 1.0,
+          "small": false
+        }
+      ]
+    },
+    {
+      "shot": 14,
+      "status": "ok",
+      "expected": [
+        "alba",
+        "grandpa"
+      ],
+      "faces": [
+        {
+          "character": "grandpa",
+          "closest": "grandpa",
+          "similarity": 0.672,
+          "small": false
+        }
+      ]
+    },
+    {
+      "shot": 15,
+      "status": "ok",
+      "expected": [
+        "grandpa"
+      ],
+      "faces": [
+        {
+          "character": "grandpa",
+          "closest": "grandpa",
+          "similarity": 0.853,
+          "small": false
+        }
+      ]
+    },
+    {
+      "shot": 16,
+      "status": "ok",
+      "expected": [
+        "grandpa"
+      ],
+      "faces": [
+        {
+          "character": "grandpa",
+          "closest": "grandpa",
+          "similarity": 0.859,
+          "small": false
+        }
+      ]
+    },
+    {
+      "shot": 17,
+      "status": "no face",
+      "expected": [
+        "grandpa"
+      ],
+      "faces": []
+    },
+    {
+      "shot": 18,
+      "status": "drift?",
+      "expected": [
+        "alba"
+      ],
+      "faces": [
+        {
+          "character": null,
+          "closest": "alba",
+          "similarity": 0.199,
+          "small": false
+        }
+      ]
+    },
+    {
+      "shot": 19,
+      "status": "ok",
+      "expected": [
+        "alba"
+      ],
+      "faces": [
+        {
+          "character": "alba",
+          "closest": "alba",
+          "similarity": 0.44,
+          "small": false
+        }
+      ]
+    },
+    {
+      "shot": 20,
+      "status": "small",
+      "expected": [
+        "grandpa"
+      ],
+      "faces": [
+        {
+          "character": null,
+          "closest": "grandpa",
+          "similarity": 0.122,
+          "small": true
+        }
+      ]
+    },
+    {
+      "shot": 21,
+      "status": "drift?",
+      "expected": [
+        "grandpa"
+      ],
+      "faces": [
+        {
+          "character": null,
+          "closest": "grandpa",
+          "similarity": 0.357,
+          "small": false
+        }
+      ]
+    },
+    {
+      "shot": 22,
+      "status": "no face",
+      "expected": [
+        "grandpa"
+      ],
+      "faces": []
+    },
+    {
+      "shot": 25,
+      "status": "drift?",
+      "expected": [
+        "alba"
+      ],
+      "faces": [
+        {
+          "character": null,
+          "closest": "alba",
+          "similarity": 0.218,
+          "small": false
+        }
+      ]
+    }
+  ]
+}

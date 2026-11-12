@@ -50,7 +50,17 @@ def make_fixture_video(path: Path) -> None:
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--port", type=int, default=8766)
-    port = ap.parse_args().port
+    ap.add_argument("--demo", action="store_true", help="serve the real demo/ bundle in demo mode (no providers)")
+    args = ap.parse_args()
+    port = args.port
+
+    if args.demo:   # the public demo exactly as it ships: no keys, no fake providers, real pre-built assets
+        root = Path(tempfile.mkdtemp(prefix="shorts-e2e-demo-"))
+        demo_dir = Path(__file__).resolve().parents[1] / "demo"
+        settings = Settings(root / "data", demo=True, demo_dir=demo_dir, demo_rate_limit=1000)
+        print(f"e2e DEMO API on http://127.0.0.1:{port} (data {root})", flush=True)
+        uvicorn.run(create_app(settings, Deps()), host="127.0.0.1", port=port, log_level="warning")
+        return
 
     # the UI enables buttons only when keys exist; these are fakes and are never sent anywhere
     os.environ.update(AZURE_SPEECH_KEY="e2e-fake", AZURE_SPEECH_REGION="e2e", GEMINI_API_KEY="e2e-fake")

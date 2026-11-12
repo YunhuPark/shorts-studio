@@ -36,6 +36,7 @@ export type Settings = {
   daily_cap_usd: number;
   spent_today_usd: number;
   keys: { azure: boolean; gemini: boolean };
+  demo?: boolean;
 };
 
 export type Job = {

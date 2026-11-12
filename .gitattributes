@@ -1,0 +1,2 @@
+# the container entrypoint must keep LF line endings, whatever core.autocrlf says on the build machine
+docker/*.sh text eol=lf

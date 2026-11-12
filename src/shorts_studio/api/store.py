@@ -83,8 +83,11 @@ class ProjectStore:
         return d
 
     def image_path(self, pid: str, n: int) -> Path | None:
-        p = self.images_dir(pid) / f"cut{n:02d}.png"
-        return p if p.exists() else None
+        for suffix in (".png", ".jpg"):   # the public demo ships downsized jpgs
+            p = self.images_dir(pid) / f"cut{n:02d}{suffix}"
+            if p.exists():
+                return p
+        return None
 
     def create(self, pid: str, storyboard: str | Path, images: str | Path | None = None,
                settings: dict | None = None) -> Path:

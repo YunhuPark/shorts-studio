@@ -8,6 +8,7 @@ const API = `http://127.0.0.1:${API_PORT}`;
 
 export default defineConfig({
   testDir: "./e2e",
+  testIgnore: "demo.spec.ts", // the demo bundle has its own config: playwright.demo.config.ts
   timeout: 60_000,
   expect: { timeout: 15_000 },
   fullyParallel: false,

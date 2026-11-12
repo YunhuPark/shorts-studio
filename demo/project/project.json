@@ -1,0 +1,21 @@
+{
+  "model": "gemini-3.1-flash-image",
+  "char_refs": {
+    "grandpa": "cut05.png",
+    "alba": "cut13.png"
+  },
+  "shot_refs": {
+    "22": [
+      "cut20.png"
+    ],
+    "23": [
+      "cut03.png"
+    ],
+    "24": [
+      "cut26.png"
+    ],
+    "25": [
+      "cut19.png"
+    ]
+  }
+}
