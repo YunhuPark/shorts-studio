@@ -71,6 +71,14 @@ cd frontend && DEMO_URL=https://<서비스 주소> npm run test:e2e:demo     # �
 - 빌드가 만든 이미지는 Artifact Registry에 쌓입니다(콘솔 Artifact Registry에서 오래된 것을 지우세요). 저장 용량이 늘면 소액이 청구될 수 있습니다.
 - 요금이 걱정되면 서비스를 지우거나 위처럼 접속을 막으면 됩니다. 인스턴스가 0이면 CPU·메모리 요금은 나오지 않습니다.
 
+## 4-1. 예산을 넘으면 자동으로 접속 차단
+월 예산 알림은 메일만 보냅니다. 예산에 도달하면 **공개 접속을 자동으로 닫는** 장치를 `infra/budget_cutoff/`에 두었습니다.
+예산 → Pub/Sub 주제 `budget-alerts` → Cloud Run 함수 `budget-cutoff`가 서비스의 `allUsers` 호출 권한만 뺍니다(서비스는 지우지 않습니다).
+- 함수의 계정 `budget-cutoff@<프로젝트>`는 **데모 서비스 하나에 대한 run.admin**과 함수 호출·이벤트 수신 권한만 갖습니다.
+- 예산 알림은 **즉시가 아닙니다.** 결제 데이터가 몇 시간 늦게 반영될 수 있어 7,000원을 조금 넘은 뒤에 막힐 수 있습니다.
+- 다시 열기: `gcloud run services update shorts-studio-demo --region asia-northeast3 --allow-unauthenticated`
+- 판정 로직은 `tests/test_budget_cutoff.py`로 검증합니다(예산 이내·도달·깨진 메시지).
+
 ## 5. 나중에 (선택)
 - **내 도메인:** Cloud Run의 도메인 매핑이나 Cloudflare 같은 DNS/CDN을 앞에 둘 수 있습니다. 그 경우 `X-Forwarded-For`에 항목이 더 붙으므로
   `SHORTS_PROXY_HOPS`를 다시 맞추고 3번을 반복하세요.
