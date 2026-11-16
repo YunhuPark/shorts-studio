@@ -35,6 +35,32 @@ STORYBOARD = {
 }
 
 
+def _shot(text, who="narrator", camera="static", highlight=(), scene="a quiet street", chars=()):
+    return {"text": text, "who": who, "camera": camera, "highlight": list(highlight), "scene": scene,
+            "chars": list(chars)}
+
+
+# what a story model would answer; the fake never calls one
+STORY = {
+    "title": "마지막 버스", "logline": "막차를 기다리던 두 사람이 우산을 나눠 쓴다.",
+    "place": "a rainy bus stop at night",
+    "characters": [
+        {"id": "ahjussi", "look": "a man in his sixties in a gray raincoat", "gender": "male", "age": "senior"},
+        {"id": "mina", "look": "a woman in her twenties with a yellow umbrella", "gender": "female",
+         "age": "young"}],
+    "shots": [
+        _shot("비 오는 밤, 마지막 버스.", camera="push_in", highlight=["마지막"],
+              scene="wide shot of the bus stop"),
+        _shot("", who="", scene="rain on the glass shelter"),
+        _shot("우산 하나뿐이네요.", who="mina", camera="handheld", scene="mina holds her umbrella",
+              chars=["mina"]),
+        _shot("같이 쓰시죠.", who="ahjussi", camera="pull_out", scene="the man steps closer",
+              chars=["ahjussi", "mina"]),
+        _shot("버스는 오지 않았다.", camera="pan_right", scene="empty road"),
+        _shot("그래도 따뜻했다.", highlight=["따뜻했다"], scene="two figures under one umbrella")],
+}
+
+
 def draw_image(path: Path, label: str, color: str) -> None:
     im = Image.new("RGB", (192, 344), color)
     ImageDraw.Draw(im).text((12, 12), label, fill="white")
@@ -116,9 +142,17 @@ def main() -> None:
             from shorts_studio.vision.faces import Face
             return [Face(np.array([1.0, 0.0]), 0.99, (0, 0, 100, 200))]
 
-    settings = Settings(root / "data", image_price_usd=0.05, daily_cap_usd=1.0)
+    class FakeStories:
+        def __call__(self, model):
+            class P:
+                def generate(self, system, prompt, schema):
+                    time.sleep(0.6)
+                    return STORY
+            return P()
+
+    settings = Settings(root / "data", image_price_usd=0.05, daily_cap_usd=1.0, story_price_usd=0.01)
     print(f"e2e API on http://127.0.0.1:{port} (data {root})", flush=True)
-    app = create_app(settings, Deps(FakeImages(), FakeVoice(), fake_render, FakeEmbedder))
+    app = create_app(settings, Deps(FakeImages(), FakeVoice(), fake_render, FakeEmbedder, story_provider=FakeStories()))
     uvicorn.run(app, host="127.0.0.1", port=port, log_level="warning")
 
 

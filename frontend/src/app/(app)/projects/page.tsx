@@ -27,8 +27,13 @@ export default function Home() {
 
   return (
     <>
-      <h1>프로젝트</h1>
-      <p className="muted">스토리보드를 고치고, 목소리를 고르고, 컷 이미지를 다시 만들어 영상을 렌더합니다.</p>
+      <div className="titlebar">
+        <div>
+          <h1>프로젝트</h1>
+          <p className="muted">한 줄 설명으로 스토리보드를 만들고, 고치고, 목소리를 고르고, 이미지를 만들어 영상을 렌더합니다.</p>
+        </div>
+        <Link className="button primary" href="/projects/new">새 이야기 만들기</Link>
+      </div>
       {error && <div className="banner" role="alert">{error}</div>}
       {settings?.demo && <DemoBanner />}
       {settings && !settings.demo && (
@@ -40,7 +45,7 @@ export default function Home() {
       )}
       {projects === null && !error && <p className="muted">불러오는 중…</p>}
       {projects && projects.length === 0 && (
-        <p className="muted">프로젝트가 없습니다. <code>python -m shorts_studio import-project …</code>로 가져오세요.</p>
+        <p className="muted">프로젝트가 없습니다. “새 이야기 만들기”로 시작하거나, <code>python -m shorts_studio import-project …</code>로 스토리보드 파일을 가져오세요.</p>
       )}
       <div className="projects">
         {projects?.map((p) => (

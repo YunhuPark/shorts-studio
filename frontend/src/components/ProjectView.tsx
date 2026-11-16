@@ -4,6 +4,7 @@ import Link from "next/link";
 import { use, useCallback, useEffect, useState } from "react";
 import { api, ApiError, describe, FaceCheck, imageUrl, Project, Settings, Shot } from "@/lib/api";
 import { DemoBanner } from "@/components/DemoBanner";
+import { ImagesPanel } from "@/components/ImagesPanel";
 import { RenderPanel } from "@/components/RenderPanel";
 import { ShotCard } from "@/components/ShotCard";
 import { VoicePanel } from "@/components/VoicePanel";
@@ -123,6 +124,8 @@ export function ProjectView({ params }: { params: Promise<{ id: string }> }) {
           </ul>
         </section>
       )}
+
+      <ImagesPanel pid={id} missing={missing} price={price} canGenerate={canGenerate} blockedReason={blockedReason} onDone={load} />
 
       <VoicePanel pid={id} voices={project.voices} azureReady={settings.keys.azure} onChanged={load} />
 

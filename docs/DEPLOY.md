@@ -77,6 +77,9 @@ cd frontend && DEMO_URL=https://<서비스 주소> npm run test:e2e:demo     # �
 - 함수의 계정 `budget-cutoff@<프로젝트>`는 **데모 서비스 하나에 대한 run.admin**과 함수 호출·이벤트 수신 권한만 갖습니다.
 - 예산 알림은 **즉시가 아닙니다.** 결제 데이터가 몇 시간 늦게 반영될 수 있어 7,000원을 조금 넘은 뒤에 막힐 수 있습니다.
 - 다시 열기: `gcloud run services update shorts-studio-demo --region asia-northeast3 --allow-unauthenticated`
+- **실제로 시험했습니다**(2026-11-16): 초과 메시지를 보내면 함수가 `budget reached`를 기록하고 권한을 뺐으며, 공개 주소는
+  1~2분 뒤부터 403이 됐습니다(권한 변경이 퍼지는 시간). 같은 명령으로 다시 열면 바로 200이 됩니다.
+  Billing이 보내는 실제 알림(`cost=0.0 budget=7000`)도 함수가 받아 처리하는 것을 로그로 확인했습니다.
 - 판정 로직은 `tests/test_budget_cutoff.py`로 검증합니다(예산 이내·도달·깨진 메시지).
 
 ## 5. 나중에 (선택)

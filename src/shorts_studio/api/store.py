@@ -89,6 +89,19 @@ class ProjectStore:
                 return p
         return None
 
+    def create_from_storyboard(self, pid: str, sb: Storyboard, settings: dict | None = None) -> Path:
+        """Create a project from a storyboard in memory (a generated story), with no images yet."""
+        if not SLUG.match(pid):
+            raise ValueError("project id must be lowercase letters, digits and hyphens")
+        d = self.projects / pid
+        if d.exists():
+            raise FileExistsError(f"project '{pid}' already exists")
+        d.mkdir(parents=True)
+        sb.save(d / "storyboard.json")
+        (d / "images").mkdir()
+        self.save_settings(pid, {**DEFAULT_SETTINGS, **(settings or {})})
+        return d
+
     def create(self, pid: str, storyboard: str | Path, images: str | Path | None = None,
                settings: dict | None = None) -> Path:
         """Create a project from an existing storyboard file (and optionally copy its images)."""

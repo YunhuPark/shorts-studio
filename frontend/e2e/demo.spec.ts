@@ -91,3 +91,13 @@ test("rendering is replayed and the pre-built video plays", async ({ page }) => 
   await expect(video).toHaveAttribute("src", /\/renders\/render-20261112-000000\.mp4$/);
   await expect.poll(() => video.evaluate((v) => (v as HTMLVideoElement).duration), { timeout: 30_000 }).toBeGreaterThan(60);
 });
+
+test("the new-story page explains that the demo opens the finished sample and then does so", async ({ page }) => {
+  await page.goto("/projects/new");
+  await expect(page.getByText("데모에서는 AI를 호출하지 않습니다")).toBeVisible();
+  await page.getByLabel("이야기").fill("무엇이든 적어 보세요");
+  await page.getByRole("button", { name: "스토리보드 만들기" }).click();
+  await expect(page.getByRole("group", { name: "비용 확인" })).toContainText("비용 없음");
+  await page.getByRole("group", { name: "비용 확인" }).getByRole("button", { name: "만들기" }).click();
+  await expect(page.getByRole("heading", { level: 1, name: "새벽 3시, 컵라면 두 개" })).toBeVisible({ timeout: 15_000 });
+});

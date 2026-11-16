@@ -1,6 +1,6 @@
 # shorts-studio
 
-스토리보드 한 장에서 **이미지 → 목소리 → 자막 → 배경음악 → 9:16 쇼츠 영상**까지 만들어 주는 파이프라인과,
+한 줄 아이디어(또는 스토리보드)에서 **이미지 → 목소리 → 자막 → 배경음악 → 9:16 쇼츠 영상**까지 만들어 주는 파이프라인과,
 그 과정을 눈으로 확인하고 고치는 대시보드입니다. (Storyboard → images → voices → rendered 9:16 short.)
 
 [![CI](https://github.com/YunhuPark/shorts-studio/actions/workflows/ci.yml/badge.svg)](https://github.com/YunhuPark/shorts-studio/actions/workflows/ci.yml)
@@ -20,6 +20,7 @@
 | 자막이 어색하게 끊김, 문장 끝 마침표 | 한국어 어절 단위 균형 분할, 수사·관형어 뒤 끊김 금지 | 단위 테스트 + 실제 렌더 프레임 |
 | 할아버지 목소리가 "그냥 낮은 목소리" | 목소리 카탈로그와 추천(음높이 실측), 내레이션 모드 | 한계도 화면에 표시 |
 | 유료 API 비용 폭주 | 사용자별 일일 한도·월 예산, 예약 후 환불 원장(SQLite) | 스레드·프로세스 동시 요청에서도 한도 초과 없음을 테스트 |
+| 스토리보드를 직접 써야 시작할 수 있음 | 한 줄 프롬프트 → Gemini가 구조화 JSON으로 스토리보드 작성 → 카메라·화자별 목소리·강조어 보정과 입력·출력 검수 → 빈 컷 이미지 일괄 생성(등장인물이 처음 나온 컷이 기준 이미지) | 단위·브라우저 테스트, 실제 모델 1회 호출로 확인(8컷, 14초). 이미지 일괄 생성은 가짜 제공자로만 검증했고 실제 호출은 아직 해 보지 않음 |
 | 오픈소스를 잘못 고를 위험 | 코드가 아니라 **모델 가중치** 라이선스까지 확인한 결정 기록 | [docs/open-source-decisions.md](docs/open-source-decisions.md) |
 
 ## 구조
@@ -38,7 +39,7 @@ flowchart LR
 설계 문서: [docs/mvp-design.md](docs/mvp-design.md), 단계별 계획과 결과: [docs/phase1-plan.md](docs/phase1-plan.md).
 
 ## 검증 방식
-- 단위 테스트 213개, 브라우저(Playwright) 테스트 18개(공개 데모용 8개 별도), `ruff` 통과.
+- 단위 테스트 254개, 브라우저(Playwright) 테스트 20개(공개 데모용 9개 별도), `ruff` 통과.
 - **테스트가 정말 잡아내는지 확인**하려고 코드를 일부러 망가뜨리는 변형 검증을 했습니다. 이 과정에서 약한 테스트 여러 개
   (항상 통과하던 테스트, 다른 요소에 맞아 통과하던 단언)를 찾아 고쳤고, 그 기록은 [open-source-decisions.md](docs/open-source-decisions.md)에,
   단계별 변형 검증 결과는 [phase1-plan.md](docs/phase1-plan.md)에 남겼습니다.

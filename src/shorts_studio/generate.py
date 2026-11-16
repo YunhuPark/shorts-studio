@@ -11,8 +11,8 @@ from PIL import Image
 from .models import Shot, Storyboard
 from .providers.base import ImageProvider, ImageSource, ProviderError
 
-SAME_AS_REFERENCE = ("Use exactly the same person or people, clothes, glasses, hats and the same store interior as "
-                     "in the reference images (same faces, same teal-striped walls, same window bar table).")
+SAME_AS_REFERENCE = ("Use exactly the same person or people, clothes, glasses, hats and accessories, and the same "
+                     "place, walls and furnishings as in the reference images (same faces, same setting).")
 NO_LOGO = "No brand logos, no trademarks and no readable text or signage anywhere in the image."
 
 

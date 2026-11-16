@@ -202,3 +202,38 @@ test("with reduced motion the story is a plain list: every step is readable with
   for (const name of ["쓴다", "고른다", "다시 만든다", "내보낸다"]) await expect(page.getByRole("heading", { level: 2, name })).toBeVisible();
   await context.close();
 });
+
+test("a prompt becomes a storyboard, and one click makes every image", async ({ page }) => {
+  await page.goto("/projects");
+  await page.getByRole("link", { name: "새 이야기 만들기" }).click();
+  await expect(page.getByRole("heading", { level: 1, name: "새 이야기 만들기" })).toBeVisible();
+  const make = page.getByRole("button", { name: "스토리보드 만들기" });
+  await expect(make).toBeDisabled(); // nothing written yet
+  await page.getByLabel("이야기").fill("비 오는 밤 버스 정류장에서 서로 모르는 두 사람이 만난다");
+  await page.getByLabel("컷 수").selectOption("6");
+  await page.getByLabel("화풍").selectOption("anime");
+  await make.click();
+  // the cost is shown first; nothing is spent until it is confirmed
+  await expect(page.getByRole("group", { name: "비용 확인" })).toContainText("$0.010");
+  await page.getByRole("group", { name: "비용 확인" }).getByRole("button", { name: "만들기" }).click();
+  await expect(page.getByRole("heading", { level: 1, name: "마지막 버스" })).toBeVisible({ timeout: 20_000 });
+  await expect(page.getByRole("article")).toHaveCount(6);
+  await expect(page.getByText("이미지 없음 6")).toBeVisible();
+
+  const panel = page.getByRole("region", { name: "이미지 만들기" });
+  await panel.getByRole("button", { name: /빈 컷 이미지 모두 만들기 \(6컷\)/ }).click();
+  await expect(panel.getByRole("group", { name: "비용 확인" })).toContainText("6컷, 약 $0.30");
+  await panel.getByRole("button", { name: "만들기" }).click();
+  await expect(page.getByRole("article").getByRole("img")).toHaveCount(6, { timeout: 60_000 });
+  await expect(panel).toBeHidden(); // nothing missing any more
+  await expect(page.getByText("이미지 없음")).toHaveCount(0);
+});
+
+test("a prompt that asks for something we do not make is refused with a reason and nothing is created", async ({ page }) => {
+  await page.goto("/projects/new");
+  await page.getByLabel("이야기").fill("야한 이야기를 만들어 줘");
+  await page.getByRole("button", { name: "스토리보드 만들기" }).click();
+  await page.getByRole("group", { name: "비용 확인" }).getByRole("button", { name: "만들기" }).click();
+  await expect(page.locator("form").getByRole("alert")).toContainText("성적인 표현");
+  await expect(page).toHaveURL(/\/projects\/new$/);
+});

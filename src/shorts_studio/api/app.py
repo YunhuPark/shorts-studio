@@ -8,7 +8,9 @@ from __future__ import annotations
 
 import os
 import re
+import secrets
 import threading
+import time
 from collections.abc import Callable
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
@@ -20,13 +22,30 @@ from PIL import Image
 from pydantic import BaseModel, Field
 
 from ..models import CAMERAS, Storyboard
-from ..providers import AzureVoiceProvider, DirectoryImageSource, GeminiImageProvider, ProviderError
+from ..providers import (
+    AzureVoiceProvider,
+    DirectoryImageSource,
+    GeminiImageProvider,
+    GeminiStoryProvider,
+    ProviderError,
+)
 from ..qa import lint
 from ..render import render as render_storyboard
 from ..render.bgm import DEFAULT_STYLE as DEFAULT_BGM_STYLE
 from ..render.bgm import STYLES as BGM_STYLES
 from ..render.subtitles import split_phrases
 from ..safety import blocking_issues
+from ..story import (
+    DEFAULT_SHOTS,
+    DEFAULT_STYLE,
+    MAX_PROMPT,
+    MAX_SHOTS,
+    MIN_SHOTS,
+    STYLES,
+    StoryError,
+    check_request,
+    generate_storyboard,
+)
 from ..vision.faces import check_shots, checks_payload
 from ..vision.fetch import ModelError
 from . import demo as demo_mode
@@ -59,6 +78,8 @@ class Settings:
     demo_dir: Path = Path("demo")
     demo_rate_limit: int = 30        # changing requests per minute per client in demo mode
     proxy_hops: int = 0              # trusted proxies in front, each appending to X-Forwarded-For; 0 = the connection
+    story_price_usd: float = 0.01    # estimate per generated story (one text-model call); check the provider's price
+    story_model: str = "gemini-3.5-flash"
 
     @classmethod
     def from_env(cls) -> Settings:
@@ -68,6 +89,8 @@ class Settings:
             extra |= {"demo": True, "demo_dir": Path(os.environ.get("SHORTS_DEMO_DIR", "demo")),
                       "demo_rate_limit": int(os.environ.get("SHORTS_DEMO_RATE", "30")),
                       "proxy_hops": int(os.environ.get("SHORTS_PROXY_HOPS", "0"))}
+        extra |= {"story_price_usd": float(os.environ.get("SHORTS_STORY_PRICE_USD", "0.01")),
+                  "story_model": os.environ.get("SHORTS_STORY_MODEL", "gemini-3.5-flash")}
         return cls(Path(os.environ.get("SHORTS_DATA", ".data")),
                    float(os.environ.get("SHORTS_IMAGE_PRICE_USD", "0.067")),
                    float(os.environ.get("SHORTS_DAILY_CAP_USD", "2.0")),
@@ -85,6 +108,7 @@ class Deps:
     # Who is calling? Local mode has one fixed user; a hosted deployment plugs in token verification here and
     # returns the authenticated user id (or raises HTTPException 401).
     owner: Callable[[Request], str] = field(default=lambda request: LOCAL_OWNER)
+    story_provider: Callable = field(default=lambda model: GeminiStoryProvider(model))
 
 
 def _opencv_embedder():
@@ -116,6 +140,13 @@ class RegenBody(BaseModel):
     confirm: bool = False
 
 
+class StoryBody(BaseModel):
+    prompt: str = Field("", max_length=MAX_PROMPT * 2)   # the exact limit is checked with a readable message
+    shots: int = DEFAULT_SHOTS
+    style: str = DEFAULT_STYLE
+    confirm: bool = False
+
+
 class RenderBody(BaseModel):
     only: list[int] | None = None
     bgm_style: str = DEFAULT_BGM_STYLE
@@ -131,6 +162,8 @@ def create_app(settings: Settings | None = None, deps: Deps | None = None) -> Fa
     ledger = CreditLedger(settings.root / "ledger.sqlite3", legacy_jsonl=settings.root / "spend.jsonl")
     stores_lock = threading.Lock()
     face_lock = threading.Lock()  # one face check at a time: it is CPU heavy
+    story_lock = threading.Lock()
+    story_busy: set[str] = set()  # owners with a story being written: one at a time each
     tts_cache = settings.root / "cache" / "tts"
     app = FastAPI(title="shorts-studio local dashboard")
     ctx = JobContext(settings.root, ledger, deps.image_provider, deps.voice_provider, deps.render_fn)
@@ -181,6 +214,17 @@ def create_app(settings: Settings | None = None, deps: Deps | None = None) -> Fa
                 stores[owner] = ProjectStore(settings.root, owner)
             return stores[owner]
 
+    def story_options(price: float) -> dict:
+        return {"price_usd": price, "min_shots": MIN_SHOTS, "max_shots": MAX_SHOTS, "default_shots": DEFAULT_SHOTS,
+                "max_prompt": MAX_PROMPT, "default_style": DEFAULT_STYLE,
+                "styles": [{"name": k, "label": v[0]} for k, v in STYLES.items()]}
+
+    def denied(res) -> HTTPException:
+        if res.reason == "monthly":
+            return HTTPException(429, {"message": "monthly budget reached; new paid work is paused"})
+        return HTTPException(429, {"message": "daily spend cap reached", "spent_today_usd": res.spent_today_usd,
+                                   "daily_cap_usd": settings.daily_cap_usd})
+
     def shot_view(store: ProjectStore, sb: Storyboard, shot, pid: str) -> dict:
         img = store.image_path(pid, shot.n)
         return {**asdict(shot), "has_image": img is not None,
@@ -206,9 +250,9 @@ def create_app(settings: Settings | None = None, deps: Deps | None = None) -> Fa
     def get_settings(owner: str = Depends(get_owner)) -> dict:
         if settings.demo:   # buttons stay enabled; nothing behind them is real
             return {"image_price_usd": 0.0, "daily_cap_usd": settings.daily_cap_usd, "spent_today_usd": 0.0,
-                    "keys": {"azure": True, "gemini": True}, "demo": True}
+                    "keys": {"azure": True, "gemini": True}, "demo": True, "story": story_options(0.0)}
         return {"image_price_usd": settings.image_price_usd, "daily_cap_usd": settings.daily_cap_usd,
-                "spent_today_usd": ledger.today_total(owner),
+                "spent_today_usd": ledger.today_total(owner), "story": story_options(settings.story_price_usd),
                 "keys": {"azure": bool(os.environ.get("AZURE_SPEECH_KEY") and os.environ.get("AZURE_SPEECH_REGION")),
                          "gemini": bool(os.environ.get("GEMINI_API_KEY"))}}
 
@@ -335,15 +379,89 @@ def create_app(settings: Settings | None = None, deps: Deps | None = None) -> Fa
             return job.public() | {"estimated_usd": 0.0}
         res = ledger.reserve(store.owner, pid, n, est, settings.daily_cap_usd, settings.monthly_cap_usd)
         if res.id is None:
-            if res.reason == "monthly":
-                raise HTTPException(429, {"message": "monthly budget reached; new paid work is paused"})
-            raise HTTPException(429, {"message": "daily spend cap reached", "spent_today_usd": res.spent_today_usd,
-                                      "daily_cap_usd": settings.daily_cap_usd})
+            raise denied(res)
         job = jobs.submit_unique(kind, pid, store.owner, {"n": n, "est": est, "reservation": res.id})
         if job is None:  # the same shot was queued in between (another tab or process): give the money back
             ledger.refund(res.id)
             raise HTTPException(409, f"shot {n} is already being regenerated")
         return job.public() | {"estimated_usd": est}
+
+    @app.post("/api/stories", status_code=201)
+    def create_story(body: StoryBody, store: ProjectStore = Depends(get_store)) -> dict:
+        """A prompt becomes a new project: the text model writes the storyboard, no image is made yet."""
+        if settings.demo:   # replay only: no model is called; the finished sample story opens instead
+            sb = store.load(demo_mode.DEMO_PROJECT)
+            return {"id": demo_mode.DEMO_PROJECT, "title": sb.title, "estimated_usd": 0.0, "demo": True}
+        try:
+            prompt = check_request(body.prompt, body.shots, body.style)   # before any money is reserved
+        except StoryError as e:
+            raise HTTPException(422, {"message": str(e)}) from e
+        est = settings.story_price_usd
+        if not body.confirm:
+            raise HTTPException(400, {"message": "confirm required", "estimated_usd": est})
+        with story_lock:
+            if store.owner in story_busy:
+                raise HTTPException(409, {"message": "이미 이야기를 만드는 중입니다. 끝난 뒤 다시 시도해 주세요."})
+            story_busy.add(store.owner)
+        try:
+            res = ledger.reserve(store.owner, "(story)", 0, est, settings.daily_cap_usd, settings.monthly_cap_usd)
+            if res.id is None:
+                raise denied(res)
+            try:
+                sb = generate_storyboard(deps.story_provider(settings.story_model), prompt, body.shots, body.style)
+            except StoryError as e:
+                ledger.refund(res.id)
+                raise HTTPException(422, {"message": str(e)}) from e
+            except ProviderError as e:
+                ledger.refund(res.id)
+                raise HTTPException(503, {"message": f"이야기를 만들지 못했습니다: {e}"}) from e
+            except BaseException:
+                ledger.refund(res.id)
+                raise
+            pid = f"story-{time.strftime('%Y%m%d-%H%M%S')}-{secrets.token_hex(2)}"
+            store.create_from_storyboard(pid, sb)
+            return {"id": pid, "title": sb.title, "shots": len(sb.shots), "estimated_usd": est}
+        finally:
+            with story_lock:
+                story_busy.discard(store.owner)
+
+    @app.post("/api/projects/{pid}/images/generate-missing", status_code=202)
+    def generate_missing(pid: str, body: RegenBody, store: ProjectStore = Depends(get_store),
+                         _writable: None = Depends(writable)) -> dict:
+        """Make every shot that has no image yet, in story order (see handlers.generate_images)."""
+        sb = store.load(pid)
+        blocked = blocking_issues(sb)
+        if blocked:
+            raise HTTPException(422, {"message": "; ".join(dict.fromkeys(i.message for i in blocked)),
+                                      "issues": [{"shot": i.shot, "message": i.message} for i in blocked]})
+        missing = [sh.n for sh in sb.shots if sh.scene.strip() and store.image_path(pid, sh.n) is None]
+        if not missing:
+            raise HTTPException(422, {"message": "모든 컷에 이미지가 이미 있습니다"})
+        est = settings.image_price_usd
+        if not body.confirm:
+            raise HTTPException(400, {"message": "confirm required", "estimated_usd": round(est * len(missing), 4),
+                                      "count": len(missing)})
+        kind = "generate-images"
+        if jobs.active(pid, kind, store.owner):
+            raise HTTPException(409, "images are already being generated for this project")
+        reservations: dict[int, int] = {}
+        last = None
+        for n in missing:   # as many as the caps allow, in story order
+            res = ledger.reserve(store.owner, pid, n, est, settings.daily_cap_usd, settings.monthly_cap_usd)
+            if res.id is None:
+                last = res
+                break
+            reservations[n] = res.id
+        if not reservations:
+            raise denied(last)
+        params = {"shots": list(reservations), "est": est, "reservations": {str(n): r for n, r in reservations.items()}}
+        job = jobs.submit_unique(kind, pid, store.owner, params)
+        if job is None:   # started in between (another tab or process): give everything back
+            for rid in reservations.values():
+                ledger.refund(rid)
+            raise HTTPException(409, "images are already being generated for this project")
+        return job.public() | {"estimated_usd": round(est * len(reservations), 4), "count": len(reservations),
+                               "skipped": len(missing) - len(reservations)}
 
     @app.post("/api/projects/{pid}/render", status_code=202)
     def start_render(pid: str, body: RenderBody, store: ProjectStore = Depends(get_store)) -> dict:

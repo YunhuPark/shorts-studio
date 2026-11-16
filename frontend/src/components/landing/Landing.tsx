@@ -14,7 +14,7 @@ const DEMO = "/projects/convenience-store";
 const FRAMES = Array.from({ length: 14 }, (_, i) => `/landing/f${String(i + 1).padStart(2, "0")}.jpg`);
 
 const STEPS = [
-  { name: "쓴다", text: "컷마다 대사와 장면을 씁니다. 자막은 쓰는 대로 미리 보이고, ‘두 개’ 같은 말은 줄이 바뀌어도 한 덩어리로 붙어 있습니다." },
+  { name: "쓴다", text: "한두 문장만 적으면 AI가 컷별 스토리보드를 씁니다. 대사와 장면은 직접 고칠 수 있고, 자막은 쓰는 대로 미리 보이며 ‘두 개’ 같은 말은 줄이 바뀌어도 한 덩어리로 붙어 있습니다." },
   { name: "고른다", text: "화자마다 목소리를 고릅니다. 나이와 성격에 맞는 후보를 추천받고, 샘플을 들어 본 뒤 정합니다." },
   { name: "다시 만든다", text: "마음에 안 드는 컷만 이미지를 다시 만듭니다. 등장인물의 얼굴이 컷마다 같은 사람인지는 얼굴 검사가 먼저 알려 줍니다." },
   { name: "내보낸다", text: "자막과 BGM을 얹어 9:16 영상으로 렌더합니다. ‘AI 생성’ 표시는 영상과 파일 정보에 함께 남길 수 있습니다." },
@@ -162,7 +162,7 @@ export function Landing() {
               <span className={s.mask}><span data-word>됩니다</span></span>
             </h1>
             <p className={s.lede} data-hero-fade>
-              컷마다 이미지를 만들고, 목소리를 고르고, 자막과 BGM을 얹어 9:16 영상으로 렌더합니다. 뒤에 흐르는 스물여섯 장면은 모두 이 도구로 만든 결과입니다.
+              한두 문장으로 이야기를 적으면 AI가 컷별 스토리보드를 쓰고, 컷마다 이미지를 만들고, 목소리를 골라 자막과 BGM을 얹어 9:16 영상으로 렌더합니다. 뒤에 흐르는 스물여섯 장면은 모두 이 도구로 만든 결과입니다.
             </p>
             <div className={s.actions} data-hero-fade>
               <Link href={DEMO} className={s.primary}>데모 열어 보기</Link>

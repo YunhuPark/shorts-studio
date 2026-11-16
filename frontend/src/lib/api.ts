@@ -31,7 +31,18 @@ export type Project = {
 
 export type ProjectSummary = { id: string; title: string; logline: string; shots: number; images: number };
 
+export type StoryOptions = {
+  price_usd: number;
+  min_shots: number;
+  max_shots: number;
+  default_shots: number;
+  max_prompt: number;
+  default_style: string;
+  styles: { name: string; label: string }[];
+};
+
 export type Settings = {
+  story?: StoryOptions;
   image_price_usd: number;
   daily_cap_usd: number;
   spent_today_usd: number;
@@ -120,6 +131,10 @@ export const api = {
     req<Recommendation>(`/api/voices/recommend?gender=${gender}&age=${age}`),
   regenerate: (id: string, n: number) =>
     req<Job & { estimated_usd: number }>(`/api/projects/${id}/shots/${n}/regenerate`, body({ confirm: true })),
+  createStory: (data: { prompt: string; shots: number; style: string }) =>
+    req<{ id: string; title: string; shots?: number; estimated_usd: number; demo?: boolean }>("/api/stories", body({ ...data, confirm: true })),
+  generateMissing: (id: string) =>
+    req<Job & { estimated_usd: number; count: number; skipped: number }>(`/api/projects/${id}/images/generate-missing`, body({ confirm: true })),
   bgmStyles: () => req<BgmStyle[]>("/api/bgm-styles"),
   render: (id: string, only?: number[], bgmStyle?: string, aiLabel?: boolean) =>
     req<Job>(
