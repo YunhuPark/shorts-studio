@@ -535,6 +535,10 @@ class DurableJobs(ApiTest):
         self.use_app(Deps(self.images, FakeVoice(), lambda *a, **k: None))   # restart: workers recover stale jobs
         got = self.wait_job(job.id)
         self.assertEqual(got["state"], "failed")
+        # recovery marks the job failed first and gives the spend back right after, in the same worker thread
+        end = time.time() + 5
+        while ledger.today_total("local") != 0.0 and time.time() < end:
+            time.sleep(0.02)
         self.assertEqual(ledger.today_total("local"), 0.0)                   # reservation given back exactly once
         self.assertEqual(self.client.get("/api/settings").json()["spent_today_usd"], 0.0)
         time.sleep(0.5)
