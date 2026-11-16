@@ -166,6 +166,8 @@ proxy's budget. Changing requests have three budgets per minute: per visitor (`S
 cheap live subtitle preview, and twenty times it for everyone together, which still caps the total if visitors cannot be told apart. The image (`Dockerfile`) installs only fastapi, uvicorn, pillow and numpy: the demo
 never renders, so ffmpeg and OpenCV are left out.
 
+**Live demo:** https://shorts-studio-demo-280103166969.asia-northeast3.run.app (Google Cloud Run, Seoul; scales to zero, so the first visit after idle takes a few seconds).
+
 Step-by-step deployment to Google Cloud Run (scale-to-zero, cost caps, how to check the visitor rate limit): [docs/DEPLOY.md](docs/DEPLOY.md).
 
 ## Input screening
