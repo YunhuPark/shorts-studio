@@ -3,8 +3,10 @@
 데모는 컨테이너 하나(UI + API)이고 유료 API를 호출하지 않습니다([README의 Public demo](../README.md)). 사용이 없으면 인스턴스가 0으로
 내려가고, 접속하면 다시 뜹니다.
 
-> **검증 상태:** 이미지는 이 저장소의 `Dockerfile`로 빌드해 로컬에서 실행·브라우저 테스트까지 확인했습니다(588MB, 메모리 약 130MiB).
-> **아래 `gcloud` 명령은 이 PC에 gcloud가 없어 실행해 보지 못했습니다.** 제가 아는 문법으로 썼으니 오류가 나면 메시지를 알려 주세요.
+> **검증 상태:** 아래 명령으로 2026-11-16에 실제 배포해 확인했습니다. 프로젝트 `shorts-studio-demo`, 서울 리전,
+> 주소 `https://shorts-studio-demo-280103166969.asia-northeast3.run.app`. 브라우저 테스트 8개가 배포본에서 통과했습니다.
+> 첫 배포에서는 API가 뜨기 전에 웹 포트가 열려 첫 요청들이 500을 받았습니다. `docker/entrypoint.sh`가 API 응답을 기다린 뒤 웹 포트를
+> 열도록 고쳐 재배포했고(revision 00002) 해결됐습니다.
 
 ## 0. 준비 (직접)
 1. Google 계정으로 [Cloud Console](https://console.cloud.google.com)에 들어가 **프로젝트를 만들고 결제 계정(카드)을 연결**합니다.
@@ -51,7 +53,7 @@ cd frontend && DEMO_URL=https://<서비스 주소> npm run test:e2e:demo     # �
 총량을 막아 주지만, 맞아야 방문자 한 명이 다른 방문자를 막지 않습니다.
 1. 집 와이파이에서 변경 요청을 35번 보냅니다(31번째부터 429가 나와야 정상).
    ```bash
-   for i in $(seq 1 35); do curl -s -o /dev/null -w "%{http_code} " -X POST https://<서비스 주소>/api/projects/convenience-store/face-check; done; echo
+   for i in $(seq 1 35); do curl -s -o /dev/null -w "%{http_code} " -X POST -d x https://<서비스 주소>/api/projects/convenience-store/face-check; done; echo
    ```
 2. **바로 이어서 휴대폰 데이터(다른 네트워크)로** 같은 방문자 수 호출을 한 번 보냅니다. 200이 나오면 방문자가 구분되는 것입니다. 429가 나오면 모든
    방문자가 한 사람으로 취급되는 것이니 `SHORTS_PROXY_HOPS`를 `2`로 바꿔 다시 배포하고 반복하세요.
