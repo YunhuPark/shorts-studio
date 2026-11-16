@@ -15,7 +15,25 @@ const tmp = path.join(out, "_video");
 mkdirSync(out, { recursive: true });
 rmSync(tmp, { recursive: true, force: true });
 
-const browser = await chromium.launch();
+// swiftshader lets headless Chromium run the landing page's WebGL background
+const browser = await chromium.launch({ args: ["--use-angle=swiftshader", "--enable-unsafe-swiftshader", "--ignore-gpu-blocklist"] });
+
+// 0. landing page: the hero, and the story one scroll later (the camera is flying through the frames)
+for (const [file, vp] of [["00-landing.png", { width: 1440, height: 900 }], ["00-landing-phone.png", { width: 390, height: 844 }]]) {
+  const landing = await browser.newContext({ viewport: vp, deviceScaleFactor: vp.width < 500 ? 2 : 1, isMobile: vp.width < 500, hasTouch: vp.width < 500 });
+  const lp = await landing.newPage();
+  await lp.goto(base + "/", { waitUntil: "networkidle" });
+  await lp.locator("[data-ready]").waitFor({ timeout: 60_000 });
+  await lp.waitForTimeout(3500);
+  await lp.screenshot({ path: path.join(out, file) });
+  if (vp.width > 500) {
+    await lp.evaluate((h) => window.scrollTo(0, h * 1.3), vp.height);
+    await lp.waitForTimeout(2500);
+    await lp.screenshot({ path: path.join(out, "00-landing-story.png") });
+  }
+  await landing.close();
+}
+
 const desktop = await browser.newContext({
   viewport: { width: 1280, height: 860 },
   recordVideo: { dir: tmp, size: { width: 1280, height: 860 } },
@@ -27,7 +45,7 @@ const shot = (name, opts = {}) => page.screenshot({ path: path.join(out, name), 
 const pause = (ms) => page.waitForTimeout(ms);
 
 // 1. project list
-await page.goto(base + "/");
+await page.goto(base + "/projects");
 await page.getByRole("heading", { name: /컵라면/ }).first().waitFor();
 await pause(700);
 await shot("01-home.png");

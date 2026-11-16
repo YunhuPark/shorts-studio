@@ -38,7 +38,7 @@ flowchart LR
 설계 문서: [docs/mvp-design.md](docs/mvp-design.md), 단계별 계획과 결과: [docs/phase1-plan.md](docs/phase1-plan.md).
 
 ## 검증 방식
-- 단위 테스트 190개, 브라우저(Playwright) 테스트 16개, `ruff` 통과.
+- 단위 테스트 213개, 브라우저(Playwright) 테스트 18개(공개 데모용 8개 별도), `ruff` 통과.
 - **테스트가 정말 잡아내는지 확인**하려고 코드를 일부러 망가뜨리는 변형 검증을 했습니다. 이 과정에서 약한 테스트 여러 개
   (항상 통과하던 테스트, 다른 요소에 맞아 통과하던 단언)를 찾아 고쳤고, 그 기록은 [open-source-decisions.md](docs/open-source-decisions.md)에,
   단계별 변형 검증 결과는 [phase1-plan.md](docs/phase1-plan.md)에 남겼습니다.
@@ -46,8 +46,12 @@ flowchart LR
   노년 음색은 근사치이고, 큐의 동시 claim 락은 테스트로 증명하지 못했습니다.
 
 ## 화면
+랜딩 페이지는 three.js로 만든 배경(예제 영상의 컷이 늘어선 복도를 카메라가 지나갑니다)과 GSAP 스크롤 연출입니다. 모션을 줄이는 설정에서는 고정·카메라 이동 없이 목록으로 읽힙니다.
+
 | | |
 |---|---|
+| ![랜딩 — PC](docs/media/00-landing.png) | ![랜딩 — 스크롤 중 장면](docs/media/00-landing-story.png) |
+| ![랜딩 — 폰](docs/media/00-landing-phone.png) | ![대시보드 — 폰](docs/media/08-mobile.png) |
 | ![프로젝트](docs/media/02-project-top.png) | ![스토리보드](docs/media/03-storyboard.png) |
 | ![실시간 자막 미리보기](docs/media/04-live-subtitles.png) | ![목소리 추천](docs/media/05-voice-recommend.png) |
 | ![얼굴 일치 검사](docs/media/06-face-check.png) | ![렌더](docs/media/07-render.png) |

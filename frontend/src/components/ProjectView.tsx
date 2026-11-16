@@ -67,7 +67,7 @@ export function ProjectView({ params }: { params: Promise<{ id: string }> }) {
   if (error) {
     return (
       <>
-        <p><Link href="/">← 프로젝트 목록</Link></p>
+        <p><Link href="/projects">← 프로젝트 목록</Link></p>
         <div className="banner" role="alert">{error}</div>
       </>
     );
@@ -94,7 +94,7 @@ export function ProjectView({ params }: { params: Promise<{ id: string }> }) {
       {settings.demo && <DemoBanner />}
       <div className="toolbar">
         <div>
-          <p className="small" style={{ margin: 0 }}><Link href="/">← 프로젝트 목록</Link></p>
+          <p className="small" style={{ margin: 0 }}><Link href="/projects">← 프로젝트 목록</Link></p>
           <h1>{project.title}</h1>
           <span className="muted small">{project.logline}</span>
         </div>

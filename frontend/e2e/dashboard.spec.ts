@@ -8,7 +8,7 @@ const openDemo = async (page: Page) => {
 };
 
 test("home lists the project and shows which services are connected", async ({ page }) => {
-  await page.goto("/");
+  await page.goto("/projects");
   await expect(page.getByRole("heading", { name: "데모 프로젝트" })).toBeVisible();
   await expect(page.getByText("컷 4개 · 이미지 3/4")).toBeVisible();
   await expect(page.getByText("음성(Azure) 연결됨")).toBeVisible();
@@ -177,3 +177,28 @@ test("narration mode switches every other character to the narrator's voice afte
   await expect(row.getByLabel("속도")).toHaveValue("+22%");
 });
 
+
+test("the landing page tells the story, links to the demo, and does not overflow on a phone", async ({ page }) => {
+  const errors: string[] = [];
+  page.on("pageerror", (e) => errors.push(e.message));
+  await page.goto("/");
+  await expect(page.getByRole("heading", { level: 1 })).toHaveText("스토리보드 한 편이 쇼츠가 됩니다");
+  for (const name of ["쓴다", "고른다", "다시 만든다", "내보낸다"]) await expect(page.getByRole("heading", { level: 2, name })).toBeAttached();
+  await expect(page.getByRole("link", { name: "데모 열어 보기" }).first()).toHaveAttribute("href", "/projects/convenience-store");
+  // the 3D background either starts or falls back to the CSS one; either way the page works and nothing throws
+  await expect(page.locator("[data-ready], [data-fallback]").first()).toBeAttached({ timeout: 20_000 });
+  for (const size of [{ width: 390, height: 844 }, { width: 1440, height: 900 }]) {
+    await page.setViewportSize(size);
+    const overflow = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
+    expect(overflow, `horizontal overflow at ${size.width}px`).toBeLessThanOrEqual(0);
+  }
+  expect(errors).toEqual([]);
+});
+
+test("with reduced motion the story is a plain list: every step is readable without scrolling through a pin", async ({ browser }) => {
+  const context = await browser.newContext({ reducedMotion: "reduce" });
+  const page = await context.newPage();
+  await page.goto("/");
+  for (const name of ["쓴다", "고른다", "다시 만든다", "내보낸다"]) await expect(page.getByRole("heading", { level: 2, name })).toBeVisible();
+  await context.close();
+});

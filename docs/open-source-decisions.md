@@ -183,3 +183,17 @@
 - VoiceStudio는 데스크톱 앱(AGPL)이고 기본 엔진이 OmniVoice다. 별 수 급등이 의심스러웠으나 포크·이슈·오너 이력으로 실제 활동하는 프로젝트로 판단을 정정했다(별 증가 시점은 확인 불가). 우리 서비스 코드에 넣으면 AGPL 의무가 생기고 모델은 엔진별 라이선스가 따로라 서비스 의존성으로는 부적합하다. 개인이 목소리를 들어 보는 용도는 가능.
 - 남은 길: ElevenLabs(상업 이용은 유료 플랜부터, 한국어 노인 음색 품질은 미확인) / Azure 카탈로그 + 추천(노인 음색 없음, 속도·음높이로 보완).
 - 교훈: 코드 라이선스와 **모델 가중치 라이선스는 다르다**(MusicGen, OmniVoice 모두 코드는 MIT/Apache, 가중치는 CC-BY-NC). 후보를 고르기 전에 모델 카드의 라이선스를 먼저 읽는다.
+
+## 2026-11-16 랜딩 페이지 전면 개편 (three.js 배경 + GSAP 스크롤)
+- 제약: 기존 랜딩이 제너릭한 AI 템플릿처럼 보임. 배경은 three.js, 스크롤 연출은 GSAP. Next.js 16, 포트폴리오(무료 운영), 폰/PC 모두.
+- 후보:
+  - three.js 직접 사용 — MIT, ★118k (mrdoob/three.js, 2026-11 push)
+  - react-three-fiber(+drei) — MIT, ★33k. 배경 하나에는 선언형 래퍼가 줄여 주는 코드가 적고 의존성만 늘어서 제외
+  - GSAP + ScrollTrigger + `@gsap/react` — 3.15.1, "Standard 'no charge' license"(SPDX 없음), ★30k
+  - Motion(framer-motion 후속) — MIT. 고정(pin)과 스크롤 연동(scrub) 타임라인이 GSAP만큼 직접적이지 않아 제외
+  - CSS scroll-driven animations 직접 구현 — 의존성 0이지만 three.js 카메라와 4단계 고정 타임라인을 엮기가 어렵고 브라우저 편차가 큼
+- 채택: **three.js(직접) + GSAP/ScrollTrigger + @gsap/react**, 글꼴은 npm 패키지(OFL)를 번들해 외부 요청을 없앰(`@fontsource/black-han-sans` 5.3.0, `pretendard` 1.3.9). three는 동적 import로 첫 화면을 막지 않음.
+- 스킬: `greensock/gsap-skills`(MIT, 순수 마크다운 8개)와 `pbakaus/impeccable`(Apache-2.0, ★110k)을 **설치하지 않고 내용만 읽어** 규칙으로 적용했다. impeccable은 첫 실행에서 바이너리를 내려받고 훅(`PostToolUse`/`Stop`)을 설치하는 구조라, 코드를 읽지 않은 채 설치하지 않는다는 원칙에 따라 가이드만 사용했다.
+- 버린 것과 이유: 위 후보 표 참고. 폰트는 처음에 `next/font/google`을 썼지만 빌드 때 구글 서버에서 내려받아야 해서(개발 서버에서 실패, CI·Cloud Build가 외부 네트워크에 의존) npm 번들로 바꿨다.
+- 라이선스 주의: **GSAP는 OSI 오픈소스가 아니다.** 사용은 무료이고 상용도 가능하지만, Webflow 같은 시각적 애니메이션 빌더를 만드는 용도 등은 제한된다(https://gsap.com/standard-license). 이 프로젝트는 그런 용도가 아니다. 소스를 재배포하거나 상품화할 때는 약관을 다시 읽는다. 랜딩의 사진(`frontend/public/landing/`)은 Gemini로 만든 데모 이미지를 줄인 것이며 NOTICE의 "재사용 불가" 범위에 든다.
+- 적용 후 확인: tsc 통과, Playwright 18개 중 랜딩 2개 추가(PC 1440·폰 390에서 가로 넘침 없음, `prefers-reduced-motion`에서 4단계가 목록으로 읽힘), 헤드리스 Chromium(SwiftShader)에서 WebGL 장면이 시작됨을 확인.

@@ -45,9 +45,17 @@ export default function Home() {
       <div className="projects">
         {projects?.map((p) => (
           <Link key={p.id} className="project-card" href={`/projects/${p.id}`}>
-            <h2>{p.title}</h2>
-            <p className="muted small">{p.logline}</p>
-            <p className="small">컷 {p.shots}개 · 이미지 {p.images}/{p.shots}</p>
+            {p.images > 0 ? (
+              // eslint-disable-next-line @next/next/no-img-element -- served by the API proxy; sized by ?w=
+              <img className="cover" src={`/api/projects/${p.id}/images/1?w=180`} alt="" loading="lazy" />
+            ) : (
+              <span className="cover empty" aria-hidden="true">이미지 없음</span>
+            )}
+            <div>
+              <h2>{p.title}</h2>
+              <p className="muted small">{p.logline}</p>
+              <p className="small">컷 {p.shots}개 · 이미지 {p.images}/{p.shots}</p>
+            </div>
           </Link>
         ))}
       </div>

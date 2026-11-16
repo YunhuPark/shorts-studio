@@ -12,7 +12,7 @@ const openDemo = async (page: Page) => {
 };
 
 test("the demo says what it is on every page and does not pretend services are connected", async ({ page }) => {
-  await page.goto("/");
+  await page.goto("/projects");
   await expect(page.getByRole("note", { name: "데모 안내" })).toContainText("실제 이미지·음성 생성은 하지 않고");
   await expect(page.getByText("연결됨")).toHaveCount(0);
   await openDemo(page);
