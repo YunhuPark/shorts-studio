@@ -3,8 +3,7 @@ import os
 from pathlib import Path
 
 from PIL import Image
-
-from test_api import ApiTest, Deps, FakeVoice, STORYBOARD
+from test_api import STORYBOARD, ApiTest, Deps, FakeVoice
 
 
 class SecurityBoundaries(ApiTest):

@@ -57,8 +57,8 @@ from .handlers import JobContext, handle, refund_orphan
 from .jobqueue import JobQueue
 from .ledger import CreditLedger
 from .store import LOCAL_OWNER, OWNER, NotFound, ProjectStore
-from .worker import start_threads
 from .voice_budget import VoiceBudgetExceeded
+from .worker import start_threads
 
 VOICE_RE = re.compile(r"^[a-z]{2}-[A-Z]{2}-[A-Za-z]+Neural$")
 RATE_RE = re.compile(r"^[+-]?\d{1,3}%$")
@@ -178,7 +178,6 @@ def create_app(settings: Settings | None = None, deps: Deps | None = None) -> Fa
     face_lock = threading.Lock()  # one face check at a time: it is CPU heavy
     story_lock = threading.Lock()
     story_busy: set[str] = set()  # owners with a story being written: one at a time each
-    tts_cache = settings.root / "cache" / "tts"
     app = FastAPI(title="shorts-studio local dashboard")
     ctx = JobContext(settings.root, ledger, deps.image_provider, deps.voice_provider, deps.render_fn,
                      settings.daily_cap_usd, settings.monthly_cap_usd,

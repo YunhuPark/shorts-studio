@@ -29,7 +29,8 @@ class VoiceTransportTests(unittest.TestCase):
         self.assertLessEqual(seen['size'],8*1024*1024+1)
 
     def test_oversized_audio_is_not_published_as_a_cache_hit(self):
-        with tempfile.TemporaryDirectory() as root, patch('urllib.request.urlopen', return_value=io.BytesIO(b'x'*(8*1024*1024+1))):
+        response = io.BytesIO(b'x' * (8 * 1024 * 1024 + 1))
+        with tempfile.TemporaryDirectory() as root, patch('urllib.request.urlopen', return_value=response):
             with self.assertRaises(ProviderError):
                 AzureVoiceProvider(root,'synthetic-key','synthetic-region').synthesize('hello',SPEC)
             self.assertEqual(list(Path(root).glob('*.wav')),[])
