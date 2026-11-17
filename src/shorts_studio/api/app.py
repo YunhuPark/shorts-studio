@@ -6,6 +6,8 @@ daily estimated-spend cap.
 """
 from __future__ import annotations
 
+import hashlib
+import io
 import os
 import re
 import secrets
@@ -56,6 +58,7 @@ from .jobqueue import JobQueue
 from .ledger import CreditLedger
 from .store import LOCAL_OWNER, OWNER, NotFound, ProjectStore
 from .worker import start_threads
+from .voice_budget import VoiceBudgetExceeded
 
 VOICE_RE = re.compile(r"^[a-z]{2}-[A-Z]{2}-[A-Za-z]+Neural$")
 RATE_RE = re.compile(r"^[+-]?\d{1,3}%$")
@@ -77,6 +80,8 @@ class Settings:
     demo: bool = False               # public demo: no provider is ever called, edits are not saved (see api/demo.py)
     demo_dir: Path = Path("demo")
     demo_rate_limit: int = 30        # changing requests per minute per client in demo mode
+    tts_global_daily_cap_usd: float = 10.0
+    tts_usd_per_character: float = 0.00005
     proxy_hops: int = 0              # trusted proxies in front, each appending to X-Forwarded-For; 0 = the connection
     story_price_usd: float = 0.01    # estimate per generated story (one text-model call); check the provider's price
     story_model: str = "gemini-3.5-flash"
@@ -95,7 +100,9 @@ class Settings:
                    float(os.environ.get("SHORTS_IMAGE_PRICE_USD", "0.067")),
                    float(os.environ.get("SHORTS_DAILY_CAP_USD", "2.0")),
                    float(os.environ.get("SHORTS_MONTHLY_CAP_USD", "0")),
-                   auth=AuthConfig.from_env(), **extra)
+                   auth=AuthConfig.from_env(),
+                   tts_global_daily_cap_usd=float(os.environ.get("SHORTS_TTS_GLOBAL_DAILY_CAP_USD", "10")),
+                   tts_usd_per_character=float(os.environ.get("SHORTS_TTS_USD_PER_CHARACTER", "0.00005")), **extra)
 
 
 @dataclass
@@ -141,9 +148,16 @@ class RegenBody(BaseModel):
 
 
 class StoryBody(BaseModel):
-    prompt: str = Field("", max_length=MAX_PROMPT * 2)   # the exact limit is checked with a readable message
+    prompt: str = Field("", max_length=MAX_PROMPT * 2)
     shots: int = DEFAULT_SHOTS
     style: str = DEFAULT_STYLE
+    confirm: bool = False
+
+
+class VoiceSampleBody(BaseModel):
+    voice: str
+    rate: str = "-10%"
+    text: str = Field(SAMPLE_TEXT, min_length=1, max_length=120)
     confirm: bool = False
 
 
@@ -166,7 +180,9 @@ def create_app(settings: Settings | None = None, deps: Deps | None = None) -> Fa
     story_busy: set[str] = set()  # owners with a story being written: one at a time each
     tts_cache = settings.root / "cache" / "tts"
     app = FastAPI(title="shorts-studio local dashboard")
-    ctx = JobContext(settings.root, ledger, deps.image_provider, deps.voice_provider, deps.render_fn)
+    ctx = JobContext(settings.root, ledger, deps.image_provider, deps.voice_provider, deps.render_fn,
+                     settings.daily_cap_usd, settings.monthly_cap_usd,
+                     settings.tts_global_daily_cap_usd, settings.tts_usd_per_character)
     app.state.stop_workers = lambda: None
     if settings.embedded_workers > 0:  # `serve --no-worker` leaves the queue to separate `worker` processes
         stop, threads = start_threads(jobs, lambda job, report: handle(ctx, job, report),
@@ -315,10 +331,12 @@ def create_app(settings: Settings | None = None, deps: Deps | None = None) -> Fa
         if w is None:
             return FileResponse(path, media_type="image/jpeg" if path.suffix == ".jpg" else "image/png")
         w = max(120, min(int(w), 1080))
-        thumb = settings.root / "cache" / "thumbs" / f"{pid}_{n}_{int(path.stat().st_mtime)}_{w}.jpg"
+        source = path.read_bytes()
+        digest = hashlib.sha256(source).hexdigest()
+        thumb = settings.root / "cache" / "thumbs-v2" / store.owner / f"{pid}_{n}_{digest}_{w}.jpg"
         if not thumb.exists():
             thumb.parent.mkdir(parents=True, exist_ok=True)
-            with Image.open(path) as im:
+            with Image.open(io.BytesIO(source)) as im:
                 rgb = im.convert("RGB")
                 rgb.thumbnail((w, int(w * 2.2)))
                 rgb.save(thumb, "JPEG", quality=84)
@@ -349,9 +367,26 @@ def create_app(settings: Settings | None = None, deps: Deps | None = None) -> Fa
             if sample is None:
                 raise HTTPException(404, "this voice has no demo sample")
             return FileResponse(sample, media_type="audio/mpeg")
+        # GET is read-only: it can serve only prebuilt samples, never paid TTS.
+        sample = demo_mode.voice_sample(settings.demo_dir, voice)
+        if sample is None:
+            raise HTTPException(404, "no prebuilt sample; use confirmed POST for paid synthesis")
+        return FileResponse(sample, media_type="audio/mpeg")
+
+    @app.post("/api/voices/sample")
+    def paid_voice_sample(body: VoiceSampleBody, owner: str = Depends(get_owner)):
+        if not body.confirm:
+            raise HTTPException(400, "confirm required for paid speech")
+        if settings.demo:
+            return voice_sample(body.voice, body.rate, body.text, owner)
+        if body.voice not in VOICE_NAMES or not RATE_RE.match(body.rate):
+            raise HTTPException(422, "unknown voice or invalid rate")
         from ..models import VoiceSpec
         try:
-            wav = deps.voice_provider(tts_cache).synthesize(text, VoiceSpec("azure", voice, rate, "0%"))
+            wav = ctx.voices(owner, "voice-sample").synthesize(
+                body.text, VoiceSpec("azure", body.voice, body.rate, "0%"))
+        except VoiceBudgetExceeded as e:
+            raise HTTPException(429, str(e)) from e
         except ProviderError as e:
             raise HTTPException(503, str(e)) from e
         return FileResponse(wav, media_type="audio/wav")

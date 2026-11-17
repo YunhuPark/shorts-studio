@@ -99,7 +99,7 @@ class CreditLedger:
         return time.strftime("%Y-%m-%d")
 
     def reserve(self, owner: str, project: str, shot: int, usd: float, daily_cap_usd: float,
-                monthly_cap_usd: float = 0.0) -> Reservation:
+                monthly_cap_usd: float = 0.0, global_daily_cap_usd: float = 0.0) -> Reservation:
         """Atomically check the caps and record the reservation. monthly_cap_usd 0 = no monthly budget."""
         day, cost = self._today(), micro(usd)
         with self._tx() as c:
@@ -107,6 +107,11 @@ class CreditLedger:
                               (owner, day)).fetchone()[0]
             if today + cost > micro(daily_cap_usd):
                 return Reservation(None, "daily", today / MICRO)
+            if global_daily_cap_usd > 0:
+                global_today = c.execute("SELECT COALESCE(SUM(micro), 0) FROM entries WHERE day=?",
+                                         (day,)).fetchone()[0]
+                if global_today + cost > micro(global_daily_cap_usd):
+                    return Reservation(None, "global daily", today / MICRO)
             if monthly_cap_usd > 0:
                 month = c.execute("SELECT COALESCE(SUM(micro), 0) FROM entries WHERE day LIKE ?",
                                   (day[:7] + "-%",)).fetchone()[0]

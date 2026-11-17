@@ -215,7 +215,7 @@ class Media(ApiTest):
         self.assertEqual(self.client.get("/api/projects/demo/images/3").status_code, 404)
 
     def test_voice_sample(self):
-        r = self.client.get("/api/voices/sample", params={"voice": "ko-KR-BongJinNeural"})
+        r = self.client.post("/api/voices/sample", json={"voice": "ko-KR-BongJinNeural", "confirm": True})
         self.assertEqual((r.status_code, r.headers["content-type"]), (200, "audio/wav"))
         self.assertEqual(self.client.get("/api/voices/sample", params={"voice": "evil"}).status_code, 422)
         too_long = self.client.get("/api/voices/sample", params={"voice": "ko-KR-BongJinNeural", "text": "가" * 121})
@@ -224,7 +224,7 @@ class Media(ApiTest):
     def test_voice_sample_provider_error_is_503(self):
         FakeVoice.fail = True
         self.addCleanup(lambda: setattr(FakeVoice, "fail", False))
-        r = self.client.get("/api/voices/sample", params={"voice": "ko-KR-BongJinNeural"})
+        r = self.client.post("/api/voices/sample", json={"voice": "ko-KR-BongJinNeural", "confirm": True})
         self.assertEqual(r.status_code, 503)
         self.assertIn("AZURE_SPEECH_KEY", r.json()["detail"])
 
