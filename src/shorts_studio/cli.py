@@ -184,7 +184,9 @@ def cmd_worker(a: argparse.Namespace) -> int:
     settings.root = Path(a.data)
     deps = Deps()
     ledger = CreditLedger(settings.root / "ledger.sqlite3", legacy_jsonl=settings.root / "spend.jsonl")
-    ctx = JobContext(settings.root, ledger, deps.image_provider, deps.voice_provider, deps.render_fn)
+    ctx = JobContext(settings.root, ledger, deps.image_provider, deps.voice_provider, deps.render_fn,
+                     settings.daily_cap_usd, settings.monthly_cap_usd,
+                     settings.tts_global_daily_cap_usd, settings.tts_usd_per_character)
     worker = Worker(JobQueue(settings.root / "jobs.sqlite3"), lambda job, report: handle(ctx, job, report),
                     lambda job: refund_orphan(ctx, job))
     print(f"worker {worker.id} waiting for jobs (data: {settings.root.resolve()}); Ctrl+C to stop")

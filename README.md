@@ -211,3 +211,8 @@ See [docs/mvp-design.md](docs/mvp-design.md) section 11.
   bundled open font (Pretendard Bold, SIL OFL 1.1; licence text in `assets/fonts/Pretendard-LICENSE.txt`).
 - Done: real-API reference-image consistency test (see "Phase 0 results" in docs/mvp-design.md).
 - Next: multi-character shots, an objective face-similarity check, and Phase 1 (API + worker).
+
+
+## Security deployment notes
+
+See [thumbnail isolation and shared speech budget configuration](docs/SECURITY_REMEDIATION.md) before enabling paid speech or running standalone workers.

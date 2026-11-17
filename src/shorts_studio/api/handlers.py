@@ -17,6 +17,7 @@ from . import demo
 from .jobqueue import Job
 from .ledger import CreditLedger
 from .store import ProjectStore
+from .voice_budget import BudgetedVoiceProvider
 
 
 @dataclass
@@ -26,6 +27,15 @@ class JobContext:
     image_provider: Callable   # model -> provider with generate(prompt, refs, out_path)
     voice_provider: Callable   # cache dir -> provider with synthesize(text, spec)
     render_fn: Callable
+    daily_cap_usd: float = 2.0
+    monthly_cap_usd: float = 0.0
+    tts_global_daily_cap_usd: float = 10.0
+    tts_usd_per_character: float = 0.00005
+
+    def voices(self, owner: str, project: str):
+        return BudgetedVoiceProvider(self.voice_provider, self.root, owner, project, self.ledger,
+                                     self.daily_cap_usd, self.monthly_cap_usd,
+                                     self.tts_global_daily_cap_usd, self.tts_usd_per_character)
 
     @property
     def tts_cache(self) -> Path:
@@ -132,7 +142,7 @@ def render(ctx: JobContext, job: Job, report) -> str:
 
     opts = RenderOptions(work_dir=store.work_dir(job.project), bgm_style=job.params.get("bgm_style", "night_piano"),
                          ai_label=bool(job.params.get("ai_label", False)))
-    ctx.render_fn(sb, DirectoryImageSource(store.images_dir(job.project)), ctx.voice_provider(ctx.tts_cache),
+    ctx.render_fn(sb, DirectoryImageSource(store.images_dir(job.project)), ctx.voices(job.owner, job.project),
                   out, opts, only, log)
     return out.name
 

@@ -150,7 +150,14 @@ export const imageUrl = (id: string, n: number, version: number | null, w?: numb
   `/api/projects/${id}/images/${n}?${w ? `w=${w}&` : ""}v=${version ?? 0}`;
 
 export async function fetchVoiceSample(voice: string, rate: string): Promise<string> {
-  const r = await fetch(`/api/voices/sample?voice=${encodeURIComponent(voice)}&rate=${encodeURIComponent(rate)}`);
+  let r = await fetch(`/api/voices/sample?voice=${encodeURIComponent(voice)}&rate=${encodeURIComponent(rate)}`);
+  if (r.status === 404) {
+    if (!window.confirm('음성 샘플을 새로 만들면 음성 이용 한도에서 차감됩니다. 계속할까요?')) {
+      throw new ApiError(400, '음성 생성이 취소되었습니다.');
+    }
+    r = await fetch('/api/voices/sample', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ voice, rate, confirm: true }) });
+  }
   if (!r.ok) {
     let detail: unknown = null;
     try {

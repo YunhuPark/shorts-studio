@@ -41,8 +41,10 @@ class AzureVoiceProvider:
                      "X-Microsoft-OutputFormat": "riff-24khz-16bit-mono-pcm",
                      "User-Agent": "shorts-studio"})
         try:
-            with urllib.request.urlopen(req) as r:
-                data = r.read()
+            with urllib.request.urlopen(req, timeout=30) as r:
+                data = r.read(8 * 1024 * 1024 + 1)
+                if len(data) > 8 * 1024 * 1024:
+                    raise ProviderError("Azure TTS response exceeds the 8 MiB audio limit")
         except urllib.error.HTTPError as e:
             raise ProviderError(f"Azure TTS failed: HTTP {e.code}") from e
         path.write_bytes(data)
