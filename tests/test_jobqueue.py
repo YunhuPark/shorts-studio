@@ -113,6 +113,39 @@ class Recovery(QueueCase):
 
 
 class Workers(QueueCase):
+    def test_run_one_waits_for_inflight_heartbeat_before_returning(self):
+        self.q.submit("heartbeat-close", "p", "local")
+        entered, release, finished = threading.Event(), threading.Event(), threading.Event()
+        original = self.q.heartbeat
+
+        def heartbeat(job_id):
+            entered.set()
+            release.wait(3)
+            original(job_id)
+
+        self.q.heartbeat = heartbeat
+
+        def handler(job, report):
+            if not entered.wait(3):
+                raise AssertionError("heartbeat never started")
+            return "done"
+
+        def run():
+            try:
+                Worker(self.q, handler, heartbeat_every=0.01).run_one()
+            finally:
+                finished.set()
+
+        runner = threading.Thread(target=run)
+        runner.start()
+        try:
+            self.assertTrue(entered.wait(3))
+            self.assertFalse(finished.wait(0.2), "worker returned while heartbeat still owns queue resources")
+        finally:
+            release.set()
+            runner.join(5)
+        self.assertFalse(runner.is_alive())
+
     def test_success_failure_and_empty_queue(self):
         ok = self.q.submit("ok", "p", "local")
         bad = self.q.submit("bad", "p", "local")

@@ -54,7 +54,8 @@ class Worker:
                 with contextlib.suppress(Exception):
                     self.queue.heartbeat(job.id)
 
-        threading.Thread(target=beat, daemon=True, name=f"beat-{job.id}").start()
+        heartbeat = threading.Thread(target=beat, daemon=True, name=f"beat-{job.id}")
+        heartbeat.start()
         try:
             result = self.handler(job, lambda line, progress=None: self.queue.report(job.id, line, progress))
         except Exception as e:  # shown to the user; the traceback goes to the job log
@@ -63,6 +64,9 @@ class Worker:
             self.queue.finish(job.id, result)
         finally:
             stop.set()
+            # An in-flight SQLite heartbeat may still own file handles. Do not
+            # return control (or allow queue teardown) until it has finished.
+            heartbeat.join()
         return True
 
     def run_forever(self, stop: threading.Event) -> None:
