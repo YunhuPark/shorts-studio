@@ -71,9 +71,26 @@ test("confirming a regeneration replaces the image and records the spend", async
 test("a voice sample can be generated and played", async ({ page }) => {
   await openDemo(page);
   const row = page.locator(".speaker", { hasText: "grandpa" });
+  page.once("dialog", (dialog) => dialog.accept());
   await row.getByRole("button", { name: "들어보기" }).click();
   await expect(row.locator("audio")).toBeVisible();
   await expect(row.locator("audio")).toHaveAttribute("src", /^blob:/);
+});
+
+test("declining paid voice confirmation makes no synthesis request", async ({ page }) => {
+  await openDemo(page);
+  const row = page.locator(".speaker", { hasText: "grandpa" });
+  const paidRequests: string[] = [];
+  page.on("request", (request) => {
+    if (request.url().includes("/api/voices/sample") && request.method() === "POST") {
+      paidRequests.push(request.url());
+    }
+  });
+  page.once("dialog", (dialog) => dialog.dismiss());
+  await row.getByRole("button", { name: "들어보기" }).click();
+  await expect(row.getByRole("status")).toContainText("취소");
+  await expect(row.locator("audio")).toHaveCount(0);
+  expect(paidRequests).toEqual([]);
 });
 
 test("an invalid speaking rate disables saving the voice", async ({ page }) => {
